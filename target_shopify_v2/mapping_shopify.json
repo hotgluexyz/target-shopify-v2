@@ -1,0 +1,40 @@
+{
+    "ignore":[
+       
+    ],  
+    "sale_orders":{
+        "customer_id":"customerId",
+        "total_discount":"appliedDiscount.amount",
+        "line_items":{
+          "product_id": "variantId",
+          "product_name": "title",
+          "sku": "sku",
+          "quantity": "quantity",
+          "unit_price": "originalUnitPrice"
+        },
+        "billing_address":{
+          "line1": "address1",
+          "line2": "address2",
+          "city": "city",
+          "state": "province",
+          "postal_code": "zip",
+          "country": "countryCode"  
+        },
+        "shipping_address":{
+          "line1": "address1",
+          "line2": "address2",
+          "city": "city",
+          "state": "province",
+          "postal_code": "zip",
+          "country": "countryCode"
+        }
+    },
+    "products":{
+      "id":"id",
+      "name":"title",
+      "sku":"sku",
+      "description":"descriptionHtml",
+      "published":"published"
+    }
+    
+}
