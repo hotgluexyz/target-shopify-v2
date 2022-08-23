@@ -59,7 +59,7 @@ class TargetShopifyV2Sink(RecordSink):
         print(json.dumps(res))
 
     def process_record(self, record: dict, context: dict) -> None:
-        if self.stream_name == "sale_orders":
+        if self.stream_name == "SalesOrders":
             self.upload_order(record)
-        if self.stream_name == "products":
+        if self.stream_name == "Products":
             self.upload_product(record)
