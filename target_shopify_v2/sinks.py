@@ -16,7 +16,7 @@ class TargetShopifyV2Sink(RecordSink):
 
     def get_http_headers(self):
         headers = {}
-        headers["X-Shopify-Access-Token"] = str(self.config.get("access_token"))
+        headers["X-Shopify-Access-Token"] = str(self.config.get("api_key"))
         headers["Content-Type"] = "application/json"
         return headers
 
