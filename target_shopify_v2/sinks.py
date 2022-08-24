@@ -16,7 +16,7 @@ class TargetShopifyV2Sink(RecordSink):
 
     def get_http_headers(self):
         headers = {}
-        headers["X-Shopify-Access-Token"] = str(self.config.get("access_token"))
+        headers["X-Shopify-Access-Token"] = str(self.config.get("api_key"))
         headers["Content-Type"] = "application/json"
         return headers
 
@@ -59,9 +59,9 @@ class TargetShopifyV2Sink(RecordSink):
         self.post_message(res)
 
     def process_record(self, record: dict, context: dict) -> None:
-        if self.stream_name == "sale_orders":
+        if self.stream_name == "SalesOrders":
             self.upload_order(record)
-        if self.stream_name == "products":
+        if self.stream_name == "Products":
             self.upload_product(record)
 
     def post_message(self, res):
