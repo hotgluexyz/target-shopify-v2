@@ -32,7 +32,6 @@
     "products":{
       "id":"id",
       "name":"title",
-      "sku":"sku",
       "description":"descriptionHtml",
       "published":"published"
     }

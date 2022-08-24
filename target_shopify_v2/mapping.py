@@ -63,7 +63,7 @@ class UnifiedMapping:
         if "location" in record:
             if "id" in record["location"]:
                 location_id = record["location"]["id"]
-        payload["variants"] = [{"title": record["variant"], "price": record["price"]}]
+        payload["variants"] = [{"title": record["variant"], "price": record["price"],"sku":record["sku"]}]
         if len(location_id) > 0:
             payload["variants"]["locationId"] = location_id
             payload["variants"]["inventoryQuantities"] = {
@@ -95,8 +95,9 @@ class UnifiedMapping:
         lookup_keys = mapping.keys()
         for lookup_key in lookup_keys:
             if lookup_key == "line_items" and target == "shopify":
+                line_items = record.get(lookup_key, [])
                 payload = self.map_shopify_lineitems(
-                    record.get(lookup_key, []), mapping[lookup_key], payload
+                    line_items.update({"sku":record["sku"]}), mapping[lookup_key], payload
                 )
             elif lookup_key == "billing_address" and target == "shopify":
                 payload = self.map_shopify_address(
