@@ -41,7 +41,7 @@ class TargetShopifyV2Sink(RecordSink):
                 }
         """
         res = self.deploy_mutation(mutation, {"input": payload})
-        print(json.dumps(res))
+        self.post_message(res)
 
     def upload_product(self, record):
         mapping = UnifiedMapping()
@@ -56,10 +56,15 @@ class TargetShopifyV2Sink(RecordSink):
                 }
         """
         res = self.deploy_mutation(mutation, {"input": payload})
-        print(json.dumps(res))
+        self.post_message(res)
 
     def process_record(self, record: dict, context: dict) -> None:
         if self.stream_name == "sale_orders":
             self.upload_order(record)
         if self.stream_name == "products":
             self.upload_product(record)
+
+    def post_message(self, res):
+        if "errors" in res:
+            raise Exception(res["errors"])
+        print(json.dumps(res))

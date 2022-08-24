@@ -19,28 +19,6 @@ class UnifiedMapping:
 
         return content
 
-    def map_salesforce_address(
-        self, addresses, address_mapping, payload, endpoint="contact"
-    ):
-        if isinstance(addresses, list):
-            other_address_mapping = {}
-            if len(addresses) > 0:
-                for key in address_mapping.keys():
-                    if key in addresses[0]:
-                        if addresses[0][key]:
-                            payload[address_mapping[key]] = addresses[0][key]
-
-                    if len(addresses) > 1:
-                        keyother = address_mapping[key].replace("Mailing", "Other")
-                        if endpoint == "account":
-                            keyother = address_mapping[key].replace(
-                                "Billing", "Shipping"
-                            )
-                        if addresses[1][key]:
-                            payload[keyother] = addresses[1][key]
-
-        return payload
-
     def map_shopify_lineitems(self, lineitems, lineitems_mapping, payload):
         payload["lineItems"] = []
         if isinstance(lineitems, list):
@@ -108,7 +86,7 @@ class UnifiedMapping:
             payload["images"] = images
         return payload
 
-    def prepare_payload(self, record, endpoint="contact", target="salesforce"):
+    def prepare_payload(self, record, endpoint="contact", target="shopify"):
         mapping = self.read_json_file(f"mapping_{target}.json")
         ignore = mapping["ignore"]
         mapping = mapping[endpoint]
@@ -116,11 +94,7 @@ class UnifiedMapping:
         payload_return = {}
         lookup_keys = mapping.keys()
         for lookup_key in lookup_keys:
-            if lookup_key == "addresses" and target == "salesforce":
-                payload = self.map_salesforce_address(
-                    record.get(lookup_key, []), mapping[lookup_key], payload, endpoint
-                )
-            elif lookup_key == "line_items" and target == "shopify":
+            if lookup_key == "line_items" and target == "shopify":
                 payload = self.map_shopify_lineitems(
                     record.get(lookup_key, []), mapping[lookup_key], payload
                 )
