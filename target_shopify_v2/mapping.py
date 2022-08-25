@@ -60,16 +60,17 @@ class UnifiedMapping:
     def inject_sopify_product_fields(self, record, payload, mapping):
         images = []
         location_id = ""
+        variant_dictionary = {}
         if "location" in record:
             if "id" in record["location"]:
                 location_id = record["location"]["id"]
-        payload["variants"] = [{"title": record["variant"], "price": record["price"],"sku":record["sku"]}]
+        variant_dictionary = {"title": record["variant"], "price": record["price"], "sku": record["sku"],"inventoryItem":{"cost": record["cost"]}}
         if len(location_id) > 0:
-            payload["variants"]["locationId"] = location_id
-            payload["variants"]["inventoryQuantities"] = {
+            variant_dictionary["inventoryQuantities"] = {
                 "availableQuantity": record["available_quantity"],
-                "inventoryItem": {"cost": record["cost"]},
+                "locationId": location_id
             }
+        payload["variants"] = [variant_dictionary]    
 
         payload["seo"] = {"description": record["short_description"]}
 
@@ -94,10 +95,14 @@ class UnifiedMapping:
         payload_return = {}
         lookup_keys = mapping.keys()
         for lookup_key in lookup_keys:
-            if lookup_key == "line_items" and target == "shopify":
+            if lookup_key == "line_items"  and target == "shopify":
                 line_items = record.get(lookup_key, [])
+                if endpoint=="products":
+                    line_items.update({"sku": record["sku"]})
                 payload = self.map_shopify_lineitems(
-                    line_items.update({"sku":record["sku"]}), mapping[lookup_key], payload
+                    line_items,
+                    mapping[lookup_key],
+                    payload,
                 )
             elif lookup_key == "billing_address" and target == "shopify":
                 payload = self.map_shopify_address(
