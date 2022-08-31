@@ -5,7 +5,6 @@
     "sale_orders":{
         "customer_id":"customerId",
         "email":"email",
-        "total_discount":"appliedDiscount.amount",
         "line_items":{
           "product_id": "variantId",
           "product_name": "title",

@@ -43,7 +43,7 @@ class TargetShopifyV2Sink(RecordSink):
             if "data" in customer:
                 if "customers" in customer["data"]:
                     if "edges" in customer["data"]["customers"]:
-                        if len(customer["data"]["customers"]["edges"])>0:
+                        if len(customer["data"]["customers"]["edges"]) > 0:
                             customer = customer["data"]["customers"]["edges"][0]["node"]
                             record["customer_id"] = customer["id"]
                             if customer["email"]:
@@ -68,11 +68,11 @@ class TargetShopifyV2Sink(RecordSink):
             if "name" in record["location"]:
                 location = self.query_locations(f"name:{record['location']['name']}")
                 if "data" in location:
-                    if len(location["data"]["locations"]["edges"])>0:
+                    if len(location["data"]["locations"]["edges"]) > 0:
                         location = location["data"]["locations"]["edges"][0]["node"]
                         record["location"]["id"] = location["id"]
                         record["location"]["name"] = location["name"]
-                
+
         payload = mapping.prepare_payload(record, "products", target="shopify")
         mutation = """ 
                 mutation productCreate($input: ProductInput!) {
@@ -86,7 +86,7 @@ class TargetShopifyV2Sink(RecordSink):
         res = self.deploy_mutation(mutation, {"input": payload})
         self.post_message(res)
 
-    def order_lookups(self,payload):
+    def order_lookups(self, payload):
         lineitems = payload["lineItems"]
         new_lineItems = []
         for lineitem in lineitems:
@@ -94,16 +94,20 @@ class TargetShopifyV2Sink(RecordSink):
             if "id" not in lineitem:
                 item = self.query_variants(f"sku:{lineitem['sku']}")
                 if "edges" in item["data"]["productVariants"]:
-                    if len(item["data"]["productVariants"]["edges"])>0:
+                    if len(item["data"]["productVariants"]["edges"]) > 0:
                         item = item["data"]["productVariants"]["edges"][0]["node"]
-                        new_item.update({"variantId":item["id"],"sku":item["sku"],"title":item["title"]})
+                        new_item.update(
+                            {
+                                "variantId": item["id"],
+                                "sku": item["sku"],
+                                "title": item["title"],
+                            }
+                        )
             new_lineItems.append(new_item)
-        payload["lineItems"] = new_lineItems   
-        return payload                
+        payload["lineItems"] = new_lineItems
+        return payload
 
-    
-
-    def query_customers(self,filter):
+    def query_customers(self, filter):
         query = """ 
                 query($filter:String){
                 customers(first: 10, query: $filter) {
@@ -116,10 +120,10 @@ class TargetShopifyV2Sink(RecordSink):
                 }
                 }
                 }  
-        """ 
+        """
         return self.shopify_query(query, {"filter": filter})
 
-    def query_variants(self,filter):
+    def query_variants(self, filter):
         query = """ 
                 query($filter:String){
                 productVariants(first: 10, query: $filter) {
@@ -132,10 +136,10 @@ class TargetShopifyV2Sink(RecordSink):
                 }
                 }
                 }  
-        """ 
+        """
         return self.shopify_query(query, {"filter": filter})
 
-    def query_locations(self,filter):
+    def query_locations(self, filter):
         query = """ 
                 query($filter:String){
                 locations(first: 10, query: $filter) {
@@ -147,8 +151,9 @@ class TargetShopifyV2Sink(RecordSink):
                 }
                 }
                 }  
-        """ 
+        """
         return self.shopify_query(query, {"filter": filter})
+
     def query_pducts(self, filter):
         query = """ 
                 query($filter:String){
@@ -161,7 +166,7 @@ class TargetShopifyV2Sink(RecordSink):
                 }
                 }
                 }  
-        """ 
+        """
         return self.shopify_query(query, {"filter": filter})
 
     def process_record(self, record: dict, context: dict) -> None:
