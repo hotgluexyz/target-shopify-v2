@@ -61,6 +61,126 @@ class TargetShopifyV2Sink(RecordSink):
         """
         res = self.deploy_mutation(mutation, {"input": payload})
         self.post_message(res)
+        res = res["data"]["draftOrderCreate"]["draftOrder"]
+        # Check if order needs to be completed
+        completed = self.complete_order(record, res, payload)
+        # completed = {"data":{"draftOrderComplete":{"draftOrder":{"order":{"id":"gid://shopify/Order/4975640084700"}}}}}
+        if "order" in completed["data"]["draftOrderComplete"]["draftOrder"]:
+            # Check and fulfil order if there were no errors
+            self.fulfil_order(
+                record,
+                completed["data"]["draftOrderComplete"]["draftOrder"]["order"]["id"],
+                payload,
+            )
+
+        # Check if order is fully paid
+        # self.mark_order_paid(record,res,payload)
+
+    def fulfil_order(self, record, order_id, payload=None):
+        try:
+            mutation = """ 
+                mutation fulfillmentCreateV2($fulfillment: FulfillmentV2Input!) {
+                fulfillmentCreateV2(fulfillment: $fulfillment) {
+                        fulfillment {
+                            # Fulfillment fields
+                            id
+                        }
+                        userErrors {
+                                field
+                                message
+                        }
+                    }
+                }
+        """
+            fulfill_items = []
+            if "fulfilled" in record:
+                if record["fulfilled"] is True:
+                    order_details = self.query_order(order_id)
+                    if "order" in order_details["data"]:
+                        line_items = order_details["data"]["order"][
+                            "fulfillmentOrders"
+                        ]["edges"]
+                        fulfill_item = {"fulfillmentOrderId": order_id}
+                        for line_item in line_items:
+                            fulfill_item["fulfillmentOrderId"] = line_item["node"]["id"]
+                            fulfill_items.append(fulfill_item)
+            fulfillment_payload = {"lineItemsByFulfillmentOrder": fulfill_items}
+            res_return = self.deploy_mutation(
+                mutation, {"fulfillment": fulfillment_payload}
+            )
+            self.post_message(res_return)
+        except Exception:
+            raise Exception
+
+    def query_order(self, order_id):
+        query = """ 
+                query($id:ID!){
+                    order(id: $id) {
+                        name
+                        id
+                        lineItems(first:10){
+                            edges{
+                                node{
+                                    id
+                                    name
+                                    quantity
+                                }
+                            }
+                        }
+                        fulfillments(first:50){
+                            id    
+                        }
+                        fulfillmentOrders(first:100){
+                            edges{
+                                node{
+                                    id
+                                }
+                            }
+                        }
+                    }
+                } 
+        """
+        return self.shopify_query(query, {"id": order_id})
+
+    def complete_order(self, record, res, payload=None):
+        res_return = {}
+        mutation = """ 
+                mutation draftOrderComplete($id: ID!) {
+                    draftOrderComplete(id: $id) {
+                        draftOrder {
+                            id
+                        order {
+                            id
+                        }
+                        }
+                        userErrors {
+                                field
+                                message
+                            }
+                    }
+                }
+        """
+        if "status" in record:
+            if record["status"] == "completed":
+                res_return = self.deploy_mutation(mutation, {"id": res["id"]})
+                self.post_message(res_return)
+        return res_return
+
+    def mark_order_paid(self, record, res, payload=None):
+        mutation = """ 
+                mutation draftOrderComplete($input: OrderMarkAsPaidInput!) {
+                    orderMarkAsPaid(input: $input) {
+                        	order {
+                                id
+                            }
+                            
+                    }
+                }
+        """
+        if "delivery_status" in record:
+            if record["delivery_status"] == "delivered":
+                res = self.deploy_mutation(mutation, {"input": {"id": res["id"]}})
+                self.post_message(res)
 
     def upload_product(self, record):
         mapping = UnifiedMapping()
