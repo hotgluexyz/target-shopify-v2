@@ -371,7 +371,7 @@ class shopifyGraphQLV2Sink(RecordSink):
         product = self.extract_product(product)
         if "operation" in item:
             operation = item["operation"]
-        if operation == "substract":
+        if operation == "subtract":
             quantity = int(f"-{item['quantity']}")
         else:
             quantity = int(item["quantity"])
