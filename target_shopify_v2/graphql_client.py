@@ -313,9 +313,9 @@ class shopifyGraphQLV2Sink(RecordSink):
         return self.shopify_query(query, {"filter": filter})
 
     def get_product_filter_key(self, item):
-        if len(item["id"]) > 0:
-            return {"key": "product_id", "val": item["id"]}
-        elif len(item["sku"]) > 0:
+        # if len(item["id"]) > 0:
+        #     return {"key": "product_id", "val": item["id"]}
+        if len(item["sku"]) > 0:
             return {"key": "sku", "val": item["sku"]}
         elif len(item["product_name"]) > 0:
             return {"key": "title", "val": item["product_name"]}
