@@ -19,28 +19,6 @@ class UnifiedMapping:
 
         return content
 
-    def map_salesforce_address(
-        self, addresses, address_mapping, payload, endpoint="contact"
-    ):
-        if isinstance(addresses, list):
-            other_address_mapping = {}
-            if len(addresses) > 0:
-                for key in address_mapping.keys():
-                    if key in addresses[0]:
-                        if addresses[0][key]:
-                            payload[address_mapping[key]] = addresses[0][key]
-
-                    if len(addresses) > 1:
-                        keyother = address_mapping[key].replace("Mailing", "Other")
-                        if endpoint == "account":
-                            keyother = address_mapping[key].replace(
-                                "Billing", "Shipping"
-                            )
-                        if addresses[1][key]:
-                            payload[keyother] = addresses[1][key]
-
-        return payload
-
     def map_shopify_lineitems(self, lineitems, lineitems_mapping, payload):
         payload["lineItems"] = []
         if isinstance(lineitems, list):
@@ -82,16 +60,22 @@ class UnifiedMapping:
     def inject_sopify_product_fields(self, record, payload, mapping):
         images = []
         location_id = ""
+        variant_dictionary = {}
         if "location" in record:
             if "id" in record["location"]:
                 location_id = record["location"]["id"]
-        payload["variants"] = [{"title": record["variant"], "price": record["price"]}]
+        variant_dictionary = {
+            "title": record["variant"],
+            "price": record["price"],
+            "sku": record["sku"],
+            "inventoryItem": {"cost": record["cost"]},
+        }
         if len(location_id) > 0:
-            payload["variants"]["locationId"] = location_id
-            payload["variants"]["inventoryQuantities"] = {
+            variant_dictionary["inventoryQuantities"] = {
                 "availableQuantity": record["available_quantity"],
-                "inventoryItem": {"cost": record["cost"]},
+                "locationId": location_id,
             }
+        payload["variants"] = [variant_dictionary]
 
         if "short_description" in record:
             payload["seo"] = {"description": record["short_description"]}
@@ -107,9 +91,18 @@ class UnifiedMapping:
                     images.append({"src": image})
         if len(images) > 0:
             payload["images"] = images
+
         return payload
 
-    def prepare_payload(self, record, endpoint="contact", target="salesforce"):
+    def inject_shopify_order_fields(self, record, payload):
+        if record["total_discount"] > 0:
+            payload["appliedDiscount"] = {}
+            payload["appliedDiscount"]["amount"] = record["total_discount"]
+            payload["appliedDiscount"]["value"] = record["total_discount"]
+            payload["appliedDiscount"]["valueType"] = "FIXED_AMOUNT"
+        return payload
+
+    def prepare_payload(self, record, endpoint="contact", target="shopify"):
         mapping = self.read_json_file(f"mapping_{target}.json")
         ignore = mapping["ignore"]
         mapping = mapping[endpoint]
@@ -117,13 +110,14 @@ class UnifiedMapping:
         payload_return = {}
         lookup_keys = mapping.keys()
         for lookup_key in lookup_keys:
-            if lookup_key == "addresses" and target == "salesforce":
-                payload = self.map_salesforce_address(
-                    record.get(lookup_key, []), mapping[lookup_key], payload, endpoint
-                )
-            elif lookup_key == "line_items" and target == "shopify":
+            if lookup_key == "line_items" and target == "shopify":
+                line_items = record.get(lookup_key, [])
+                if endpoint == "products":
+                    line_items.update({"sku": record["sku"]})
                 payload = self.map_shopify_lineitems(
-                    record.get(lookup_key, []), mapping[lookup_key], payload
+                    line_items,
+                    mapping[lookup_key],
+                    payload,
                 )
             elif lookup_key == "billing_address" and target == "shopify":
                 payload = self.map_shopify_address(
@@ -151,6 +145,9 @@ class UnifiedMapping:
         # inject special fields of shopify product before returning payload
         if target == "shopify" and endpoint == "products":
             payload = self.inject_sopify_product_fields(record, payload, mapping)
+
+        if target == "shopify" and endpoint == "sale_orders":
+            payload = self.inject_shopify_order_fields(record, payload)
 
         # filter ignored keys
         for key in payload.keys():
