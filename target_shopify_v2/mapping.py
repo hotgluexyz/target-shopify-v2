@@ -93,7 +93,8 @@ class UnifiedMapping:
                 "inventoryItem": {"cost": record["cost"]},
             }
 
-        payload["seo"] = {"description": record["short_description"]}
+        if "short_description" in record:
+            payload["seo"] = {"description": record["short_description"]}
 
         if "active" in record:
             if record["active"] is True:
