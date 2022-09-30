@@ -60,25 +60,33 @@ class UnifiedMapping:
     def inject_sopify_product_fields(self, record, payload, mapping):
         images = []
         location_id = ""
-        variant_dictionary = {}
+    
         if "location" in record:
             if "id" in record["location"]:
                 location_id = record["location"]["id"]
-        variant_dictionary = {
-            "title": record["variant"],
-            "price": record["price"],
-            "sku": record["sku"],
-            "inventoryItem": {"cost": record["cost"]},
-        }
-        if len(location_id) > 0:
-            variant_dictionary["inventoryQuantities"] = {
-                "availableQuantity": record["available_quantity"],
-                "locationId": location_id,
+        
+        payload["variants"] = []
+        for variant in record.get("variants"):
+            variant_dictionary = {}
+            variant_dictionary = {
+                "title": variant.get("title", record["name"]),
+                "price": variant["price"],
+                "sku": variant["sku"],
+                "options": variant.get("options", []),
+                "inventoryItem": {"cost": variant["cost"], "tracked": True},
             }
-        payload["variants"] = [variant_dictionary]
+            if len(location_id) > 0:
+                variant_dictionary["inventoryQuantities"] = {
+                    "availableQuantity": variant["available_quantity"],
+                    "locationId": location_id,
+                }
+            payload["variants"].append(variant_dictionary)
 
         if "short_description" in record:
             payload["seo"] = {"description": record["short_description"]}
+        
+        if "options" in record:
+            payload["options"] = record["options"]
 
         if "active" in record:
             if record["active"] is True:
