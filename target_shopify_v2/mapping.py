@@ -72,14 +72,20 @@ class UnifiedMapping:
                 "title": variant.get("title", record["name"]),
                 "price": variant["price"],
                 "sku": variant["sku"],
-                "options": variant.get("options", []),
                 "inventoryItem": {"cost": variant["cost"], "tracked": True},
             }
+            if "options" in record and variant.get("options"):
+                variant_dictionary["options"] = []
+                for option in record["options"]:
+                    value = next(o["value"] for o in variant["options"] if o["name"]==option)
+                    variant_dictionary["options"].append(value)
             if len(location_id) > 0:
                 variant_dictionary["inventoryQuantities"] = {
                     "availableQuantity": variant["available_quantity"],
                     "locationId": location_id,
                 }
+            if "image_urls" in record:
+                variant_dictionary["imageSrc"] = record["image_urls"][0]
             payload["variants"].append(variant_dictionary)
 
         if "short_description" in record:
@@ -88,6 +94,16 @@ class UnifiedMapping:
         if "options" in record:
             payload["options"] = record["options"]
 
+        if record.get("custom_fields"):
+            payload["metafields"] = []
+
+        for field in record.get("custom_fields", []):
+            metafields = {}
+            metafields["key"] = field["name"]
+            metafields["namespace"] = field["name"]
+            metafields["type"] = "single_line_text_field"
+            metafields["value"] = field["value"]
+            payload["metafields"].append(metafields)
         if "active" in record:
             if record["active"] is True:
                 payload["status"] = "ACTIVE"
