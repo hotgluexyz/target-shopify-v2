@@ -101,7 +101,7 @@ class UnifiedMapping:
             metafields = {}
             metafields["key"] = field["name"]
             metafields["namespace"] = field["name"]
-            metafields["type"] = "single_line_text_field"
+            metafields["valueType"] = "STRING"
             metafields["value"] = field["value"]
             payload["metafields"].append(metafields)
         if "active" in record:
