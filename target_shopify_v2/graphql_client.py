@@ -185,14 +185,22 @@ class shopifyGraphQLV2Sink(RecordSink):
 
     def upload_product(self, record):
         mapping = UnifiedMapping()
-        if "location" in record:
-            if "name" in record["location"]:
-                location = self.query_locations(f"name:{record['location']['name']}")
-                if "data" in location:
-                    if len(location["data"]["locations"]["edges"]) > 0:
-                        location = location["data"]["locations"]["edges"][0]["node"]
-                        record["location"]["id"] = location["id"]
-                        record["location"]["name"] = location["name"]
+        location = None
+        locations = self.query_locations(None)
+        if "data" in locations:
+            if len(locations["data"]["locations"]["edges"]) > 0:
+                locations = locations["data"]["locations"]["edges"]
+                valid_locations = [l["node"] for l in locations if l["node"]["isActive"]]
+                if len(valid_locations)==1:
+                    location = valid_locations[0]
+
+                elif "location" in record:
+                    if "name" in record["location"]:
+                        location = next((l for l in valid_locations if l["name"]==record['location']['name']), None)
+        if location:
+            record["location"] = dict(id=location["id"], name=location["name"])
+        else:
+            raise NameError("Missing location")
 
         payload = mapping.prepare_payload(record, "products", target="shopify")
         mutation = """ 
@@ -263,11 +271,12 @@ class shopifyGraphQLV2Sink(RecordSink):
     def query_locations(self, filter):
         query = """ 
                 query($filter:String){
-                locations(first: 10, query: $filter) {
+                locations(first: 25, query: $filter) {
                     edges {
                     node {
                         id
                         name
+                        isActive
                     }
                 }
                 }
