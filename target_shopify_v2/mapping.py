@@ -68,24 +68,31 @@ class UnifiedMapping:
         payload["variants"] = []
         for variant in record.get("variants"):
             variant_dictionary = {}
-            variant_dictionary = {
-                "title": variant.get("title", record["name"]),
-                "price": variant["price"],
-                "sku": variant["sku"],
-                "inventoryItem": {"cost": variant["cost"], "tracked": True},
-            }
+            if variant.get("title", record["name"]):
+                variant_dictionary["title"] = variant.get("title", record["name"])
+            if variant.get("price"):
+                variant_dictionary["price"] = variant.get("price")
+            if variant.get("sku"):
+                variant_dictionary["sku"] = variant.get("sku")
+            if variant.get("cost"):
+                variant_dictionary["inventoryItem"] = {"cost": variant["cost"], "tracked": True}
+            if variant.get("id"):
+                if "gid://shopify/ProductVariant/" not in variant["id"]:
+                    variant_dictionary["id"] = "gid://shopify/ProductVariant/" + str(variant["id"])
             if "options" in record and variant.get("options"):
                 variant_dictionary["options"] = []
                 for option in record["options"]:
                     value = next(o["value"] for o in variant["options"] if o["name"]==option)
                     variant_dictionary["options"].append(value)
             if len(location_id) > 0:
-                variant_dictionary["inventoryQuantities"] = {
-                    "availableQuantity": variant["available_quantity"],
-                    "locationId": location_id,
-                }
-            if "image_urls" in record:
-                variant_dictionary["imageSrc"] = record["image_urls"][0]
+                if variant.get("available_quantity"):
+                    variant_dictionary["inventoryQuantities"] = {
+                        "availableQuantity": variant["available_quantity"],
+                        "locationId": location_id,
+                    }
+            if "image_urls" in variant:
+                variant_dictionary["imageSrc"] = variant["image_urls"][0]
+                images.extend([{"src": i} for i in variant["image_urls"]])
             payload["variants"].append(variant_dictionary)
 
         if "short_description" in record:
@@ -100,8 +107,8 @@ class UnifiedMapping:
         for field in record.get("custom_fields", []):
             metafields = {}
             metafields["key"] = field["name"]
-            metafields["namespace"] = field["name"]
-            metafields["type"] = "single_line_text_field"
+            metafields["namespace"] = "custom"
+            metafields["valueType"] = "STRING"
             metafields["value"] = field["value"]
             payload["metafields"].append(metafields)
         if "active" in record:
