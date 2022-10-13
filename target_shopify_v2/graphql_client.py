@@ -203,15 +203,29 @@ class shopifyGraphQLV2Sink(RecordSink):
             raise NameError("Missing location")
 
         payload = mapping.prepare_payload(record, "products", target="shopify")
-        mutation = """ 
-                mutation productCreate($input: ProductInput!) {
-                productCreate(input: $input) {
+
+        # fix the id if missing prefix
+        if payload.get("id"):
+            if "gid://shopify/Product/" not in payload["id"]:
+                payload["id"] = "gid://shopify/Product/" + str(payload["id"])
+
+            mutation = """ 
+                mutation productUpdate($input: ProductInput!) {
+                productUpdate(input: $input) {
                     product {
                     id
                     }
                 }
-                }
-        """
+                }"""
+        else:
+            mutation = """ 
+                    mutation productCreate($input: ProductInput!) {
+                    productCreate(input: $input) {
+                        product {
+                        id
+                        }
+                    }
+                    }"""
         res = self.deploy_mutation(mutation, {"input": payload})
         self.post_message(res)
 
