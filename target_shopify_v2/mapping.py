@@ -47,7 +47,8 @@ class UnifiedMapping:
         countries = self.read_json_file(f"countries.json")
         for key in address_mapping.keys():
             address[address_mapping[key]] = addresses[key]
-        address["countryCode"] = countries[address["countryCode"]]
+        if len(address["countryCode"])==3:
+            address["countryCode"] = countries[address["countryCode"]]
         payload[type] = address
         return payload
 
@@ -126,7 +127,7 @@ class UnifiedMapping:
         return payload
 
     def inject_shopify_order_fields(self, record, payload):
-        if record["total_discount"] > 0:
+        if record.get("total_discount") and float(record["total_discount"]) > 0:
             payload["appliedDiscount"] = {}
             payload["appliedDiscount"]["amount"] = record["total_discount"]
             payload["appliedDiscount"]["value"] = record["total_discount"]
