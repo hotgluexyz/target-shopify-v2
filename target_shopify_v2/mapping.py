@@ -30,12 +30,13 @@ class UnifiedMapping:
                         if key in line:
                             if line[key]:
                                 line_item[lineitems_mapping[key]] = line[key]
-                    if line["discount_amount"] > 0:
+                    if line.get("discount_amount") and line["discount_amount"] > 0:
                         line_item["appliedDiscount"] = {}
                         line_item["appliedDiscount"]["amount"] = 0
                         line_item["appliedDiscount"]["amount"] = line["discount_amount"]
                         line_item["appliedDiscount"]["value"] = line["discount_amount"]
                         line_item["appliedDiscount"]["valueType"] = "FIXED_AMOUNT"
+                    line_item["quantity"] = int(line_item["quantity"])
                     payload["lineItems"].append(line_item)
 
         return payload
