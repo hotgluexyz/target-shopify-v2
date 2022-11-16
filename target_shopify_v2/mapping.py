@@ -48,7 +48,7 @@ class UnifiedMapping:
         countries = self.read_json_file(f"countries.json")
         for key in address_mapping.keys():
             address[address_mapping[key]] = addresses[key]
-        if len(address["countryCode"])==3:
+        if len(address["countryCode"]) == 3:
             address["countryCode"] = countries[address["countryCode"]]
         payload[type] = address
         return payload
@@ -62,11 +62,11 @@ class UnifiedMapping:
     def inject_sopify_product_fields(self, record, payload, mapping):
         images = []
         location_id = ""
-    
+
         if "location" in record:
             if "id" in record["location"]:
                 location_id = record["location"]["id"]
-        
+
         payload["variants"] = []
         for variant in record.get("variants"):
             variant_dictionary = {}
@@ -77,14 +77,21 @@ class UnifiedMapping:
             if variant.get("sku"):
                 variant_dictionary["sku"] = variant.get("sku")
             if variant.get("cost"):
-                variant_dictionary["inventoryItem"] = {"cost": variant["cost"], "tracked": True}
+                variant_dictionary["inventoryItem"] = {
+                    "cost": variant["cost"],
+                    "tracked": True,
+                }
             if variant.get("id"):
                 if "gid://shopify/ProductVariant/" not in variant["id"]:
-                    variant_dictionary["id"] = "gid://shopify/ProductVariant/" + str(variant["id"])
+                    variant_dictionary["id"] = "gid://shopify/ProductVariant/" + str(
+                        variant["id"]
+                    )
             if "options" in record and variant.get("options"):
                 variant_dictionary["options"] = []
                 for option in record["options"]:
-                    value = next(o["value"] for o in variant["options"] if o["name"]==option)
+                    value = next(
+                        o["value"] for o in variant["options"] if o["name"] == option
+                    )
                     variant_dictionary["options"].append(value)
             if len(location_id) > 0:
                 if variant.get("available_quantity"):
@@ -99,7 +106,7 @@ class UnifiedMapping:
 
         if "short_description" in record:
             payload["seo"] = {"description": record["short_description"]}
-        
+
         if "options" in record:
             payload["options"] = record["options"]
 

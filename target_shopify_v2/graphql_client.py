@@ -40,15 +40,19 @@ class shopifyGraphQLV2Sink(RecordSink):
     def upload_order(self, record):
         mapping = UnifiedMapping()
         if "customer_name" in record:
-            customer = self.query_customers(record["customer_name"])
-            if "data" in customer:
-                if "customers" in customer["data"]:
-                    if "edges" in customer["data"]["customers"]:
-                        if len(customer["data"]["customers"]["edges"]) > 0:
-                            customer = customer["data"]["customers"]["edges"][0]["node"]
-                            record["customer_id"] = customer["id"]
-                            if customer["email"]:
-                                record["email"] = customer["email"]
+            if record["customer_name"] is not None:
+                customer = self.query_customers(record["customer_name"])
+                if "data" in customer:
+                    if customer["data"] is not None:
+                        if "customers" in customer["data"]:
+                            if "edges" in customer["data"]["customers"]:
+                                if len(customer["data"]["customers"]["edges"]) > 0:
+                                    customer = customer["data"]["customers"]["edges"][
+                                        0
+                                    ]["node"]
+                                    record["customer_id"] = customer["id"]
+                                    if customer["email"]:
+                                        record["email"] = customer["email"]
         payload = mapping.prepare_payload(record, "sale_orders", target="shopify")
         payload = self.order_lookups(payload)
         mutation = """ 
@@ -66,7 +70,10 @@ class shopifyGraphQLV2Sink(RecordSink):
         # Check if order needs to be completed
         completed = self.complete_order(record, res, payload)
         # completed = {"data":{"draftOrderComplete":{"draftOrder":{"order":{"id":"gid://shopify/Order/4975640084700"}}}}}
-        if completed and "order" in completed["data"]["draftOrderComplete"]["draftOrder"]:
+        if (
+            completed
+            and "order" in completed["data"]["draftOrderComplete"]["draftOrder"]
+        ):
             # Check and fulfil order if there were no errors
             self.fulfil_order(
                 record,
@@ -190,13 +197,22 @@ class shopifyGraphQLV2Sink(RecordSink):
         if "data" in locations:
             if len(locations["data"]["locations"]["edges"]) > 0:
                 locations = locations["data"]["locations"]["edges"]
-                valid_locations = [l["node"] for l in locations if l["node"]["isActive"]]
-                if len(valid_locations)==1:
+                valid_locations = [
+                    l["node"] for l in locations if l["node"]["isActive"]
+                ]
+                if len(valid_locations) == 1:
                     location = valid_locations[0]
 
                 elif "location" in record:
                     if "name" in record["location"]:
-                        location = next((l for l in valid_locations if l["name"]==record['location']['name']), None)
+                        location = next(
+                            (
+                                l
+                                for l in valid_locations
+                                if l["name"] == record["location"]["name"]
+                            ),
+                            None,
+                        )
         if location:
             record["location"] = dict(id=location["id"], name=location["name"])
         else:
@@ -235,7 +251,10 @@ class shopifyGraphQLV2Sink(RecordSink):
         for lineitem in lineitems:
             new_item = lineitem
             if "id" not in lineitem:
-                item = self.query_variants(f"sku:{lineitem['sku']}")
+                if "sku" in lineitem:
+                    item = self.query_variants(f"sku:{lineitem['sku']}")
+                elif "title" in lineitem:
+                    item = self.query_variants(f"title:{lineitem['title']}")
                 if "edges" in item["data"]["productVariants"]:
                     if len(item["data"]["productVariants"]["edges"]) > 0:
                         item = item["data"]["productVariants"]["edges"][0]["node"]
