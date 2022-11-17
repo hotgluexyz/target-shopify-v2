@@ -242,8 +242,8 @@ class shopifyGraphQLV2Sink(RecordSink):
                         }
                     }
                     }"""
-        res = self.deploy_mutation(mutation, {"input": payload})
-        self.post_message(res)
+        # res = self.deploy_mutation(mutation, {"input": payload})
+        # self.post_message(res)
 
     def order_lookups(self, payload):
         lineitems = payload["lineItems"]
