@@ -74,6 +74,10 @@ class UnifiedMapping:
                 variant_dictionary["title"] = variant.get("title", record["name"])
             if variant.get("price"):
                 variant_dictionary["price"] = variant.get("price")
+            if variant.get("id"):
+                if "gid://shopify/ProductVariant/" not in variant["id"]:
+                    id = "gid://shopify/ProductVariant/" + str(variant["id"])
+                variant_dictionary["id"] = variant["id"]
             if variant.get("sku"):
                 variant_dictionary["sku"] = variant.get("sku")
             if variant.get("cost"):
