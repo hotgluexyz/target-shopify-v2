@@ -120,6 +120,24 @@ class shopifyGraphQLV2Sink(RecordSink):
         except Exception:
             raise Exception
 
+    def query_sku(self, sku):
+        query = """ 
+            query tapShopify($first: Int, $query: String) {
+                productVariants(first: $first, query: $query) {
+                    edges {
+                        cursor node {
+                            id
+                            product {
+                                id
+                            }
+                        }
+                    },
+                pageInfo { hasNextPage }
+                }
+            }
+        """
+        return self.shopify_query(query, {"first": 1, "query": sku})
+
     def query_order(self, order_id):
         query = """ 
                 query($id:ID!){
@@ -194,6 +212,24 @@ class shopifyGraphQLV2Sink(RecordSink):
         mapping = UnifiedMapping()
         location = None
         locations = self.query_locations(None)
+
+        record["variants"] = (record.get("variants") or [])
+
+        product_id = record.get("id")
+        for variant in record["variants"]:
+            sku = variant.get("sku")
+            if sku:
+                ids = self.query_sku(sku)
+                try:
+                    ids = ids["data"]["productVariants"]["edges"]
+                except KeyError:
+                    ids = None
+                if ids:
+                    ids = ids[0]["node"]
+                    variant["id"] = ids["id"]
+                    product_id = ids["product"]["id"]
+        record["id"] = product_id
+
         if "data" in locations:
             if len(locations["data"]["locations"]["edges"]) > 0:
                 locations = locations["data"]["locations"]["edges"]
@@ -222,9 +258,28 @@ class shopifyGraphQLV2Sink(RecordSink):
 
         # fix the id if missing prefix
         if payload.get("id"):
+
             if "gid://shopify/Product/" not in payload["id"]:
                 payload["id"] = "gid://shopify/Product/" + str(payload["id"])
 
+            if payload.get("variants"):
+                variants = payload.pop("variants")
+                for variant in variants:
+                    variant.pop("title")
+                mutation = """ 
+                    mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+                    productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+                        product
+                        {
+                            id
+                        }
+                        productVariants {
+                            id
+                        }
+                    }
+                    }"""
+                res = self.deploy_mutation(mutation, {"productId": payload["id"], "variants": variants})
+                self.post_message(res)
             mutation = """ 
                 mutation productUpdate($input: ProductInput!) {
                 productUpdate(input: $input) {
@@ -233,6 +288,8 @@ class shopifyGraphQLV2Sink(RecordSink):
                     }
                 }
                 }"""
+            res = self.deploy_mutation(mutation, {"input": payload})
+            self.post_message(res)
         else:
             mutation = """ 
                     mutation productCreate($input: ProductInput!) {
@@ -242,8 +299,8 @@ class shopifyGraphQLV2Sink(RecordSink):
                         }
                     }
                     }"""
-        res = self.deploy_mutation(mutation, {"input": payload})
-        self.post_message(res)
+            res = self.deploy_mutation(mutation, {"input": payload})
+            self.post_message(res)
 
     def order_lookups(self, payload):
         lineitems = payload["lineItems"]

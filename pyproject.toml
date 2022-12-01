@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "target-shopify-v2"
-version = "0.0.3"
+version = "0.0.4"
 description = "`target-shopify-v2` is a Singer target for TargetShopifyV2, built with the Meltano SDK for Singer Targets."
 authors = ["Adil Ahmed"]
 keywords = [
