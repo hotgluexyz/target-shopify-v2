@@ -262,10 +262,29 @@ class shopifyGraphQLV2Sink(RecordSink):
             if "gid://shopify/Product/" not in payload["id"]:
                 payload["id"] = "gid://shopify/Product/" + str(payload["id"])
 
+            variants_update = []
+            variants_create = []
             if payload.get("variants"):
                 variants = payload.pop("variants")
                 for variant in variants:
                     variant.pop("title")
+                    if "id" in variant:
+                        variants_update.append(variant)
+                    else:
+                        variants_create.append(variant)
+
+            mutation = """ 
+                mutation productUpdate($input: ProductInput!) {
+                productUpdate(input: $input) {
+                    product {
+                    id
+                    }
+                }
+                }"""
+            res = self.deploy_mutation(mutation, {"input": payload})
+            self.post_message(res)
+
+            if variants_update:
                 mutation = """ 
                     mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
                     productVariantsBulkUpdate(productId: $productId, variants: $variants) {
@@ -278,18 +297,25 @@ class shopifyGraphQLV2Sink(RecordSink):
                         }
                     }
                     }"""
-                res = self.deploy_mutation(mutation, {"productId": payload["id"], "variants": variants})
+                res = self.deploy_mutation(mutation, {"productId": payload["id"], "variants": variants_update})
                 self.post_message(res)
-            mutation = """ 
-                mutation productUpdate($input: ProductInput!) {
-                productUpdate(input: $input) {
-                    product {
-                    id
+            
+            if variants_create:
+                mutation = """ 
+                    mutation productVariantsBulkCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+                    productVariantsBulkCreate(productId: $productId, variants: $variants) {
+                        product
+                        {
+                            id
+                        }
+                        productVariants {
+                            id
+                        }
                     }
-                }
-                }"""
-            res = self.deploy_mutation(mutation, {"input": payload})
-            self.post_message(res)
+                    }"""
+                res = self.deploy_mutation(mutation, {"productId": payload["id"], "variants": variants_create})
+                self.post_message(res)
+
         else:
             mutation = """ 
                     mutation productCreate($input: ProductInput!) {
