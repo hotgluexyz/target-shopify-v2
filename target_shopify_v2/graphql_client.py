@@ -3,6 +3,7 @@
 
 import json
 from itertools import product
+import re
 
 import requests
 from singer_sdk.sinks import RecordSink
@@ -401,45 +402,70 @@ class shopifyGraphQLV2Sink(RecordSink):
         return self.shopify_query(query, {"filter": filter})
 
     def query_pducts(self, filter):
-        query = """           
-            query($filter:String){
-                products(first: 10, query: $filter) {
-                    edges {
-                    node {
+        if "variant_id" in filter:
+            query = """
+                query tapShopify($id: ID!) {
+                    productVariant(id: $id) {  
                         id
-                        title
-                        totalInventory
-                        tracksInventory
-                        variants(first: 10){
-                            edges{
-                                node{
-                                    id
-                                    inventoryItem{
+                        product {
+                            id
+                        }
+                        inventoryItem{
+                            id
+                            sku
+                            inventoryLevels(first:1){
+                                edges{
+                                    node{
                                         id
-                                        sku
-                                        inventoryLevels(first:1){
-                                            edges{
-                                                node{
-                                                    id
-                                                    available
+                                        available
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            """
+            return self.shopify_query(query, {"id": "gid://shopify/ProductVariant/"+re.findall('\d+',filter)[0]})
+        else:
+            query = """           
+                query($filter:String){
+                    products(first: 10, query: $filter) {
+                        edges {
+                        node {
+                            id
+                            title
+                            totalInventory
+                            tracksInventory
+                            variants(first: 10){
+                                edges{
+                                    node{
+                                        id
+                                        inventoryItem{
+                                            id
+                                            sku
+                                            inventoryLevels(first:1){
+                                                edges{
+                                                    node{
+                                                        id
+                                                        available
+                                                    }
                                                 }
                                             }
                                         }
                                     }
                                 }
                             }
+                            
                         }
-                        
                     }
                 }
-            }
-            }  
-        """
-        return self.shopify_query(query, {"filter": filter})
+                }  
+            """
+            return self.shopify_query(query, {"filter": filter})
 
     def get_product_filter_key(self, item):
-        # if len(item["id"]) > 0:
-        #     return {"key": "product_id", "val": item["id"]}
+        if len(item["variant_id"]) > 0:
+            return {"key": "variant_id", "val": eval(item["variant_id"])}
         if len(item["sku"]) > 0:
             return {"key": "sku", "val": item["sku"]}
         elif len(item["product_name"]) > 0:
@@ -450,16 +476,18 @@ class shopifyGraphQLV2Sink(RecordSink):
         if "errors" in detail:
             return None
         product = detail
-        if len(detail["data"]["products"]["edges"]) > 0:
+
+        if detail['data'].get('productVariant'):
+            inventory_item = detail['data']['productVariant']['inventoryItem']
+        
+        elif len(detail["data"]["products"]["edges"]) > 0:
             product = detail["data"]["products"]["edges"][0]["node"]
             if len(product["variants"]["edges"]) > 0:
-                inventory_item = product["variants"]["edges"][0]["node"][
-                    "inventoryItem"
-                ]
-                if len(inventory_item["inventoryLevels"]["edges"]) > 0:
-                    product["inventory_level"] = inventory_item["inventoryLevels"][
-                        "edges"
-                    ][0]["node"]
+                inventory_item = product["variants"]["edges"][0]["node"]["inventoryItem"]
+        if len(inventory_item["inventoryLevels"]["edges"]) > 0:
+            product["inventory_level"] = inventory_item["inventoryLevels"][
+                "edges"
+            ][0]["node"]
         return product
 
     def update_product_mutation(self, level_id, quantity):
