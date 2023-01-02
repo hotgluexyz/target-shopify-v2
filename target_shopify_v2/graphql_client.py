@@ -119,7 +119,7 @@ class shopifyGraphQLV2Sink(RecordSink):
                         for line_item in line_items:
                             fulfill_item["fulfillmentOrderId"] = line_item["node"]["id"]
                             fulfill_items.append(fulfill_item)
-                    tracking_info = {"company": record["carrier"] , "number": record["tracking_number"]}  
+                    tracking_info = {"company": record.get("carrier") , "number": record.get("tracking_number")}  
                     
             fulfillment_payload = {"lineItemsByFulfillmentOrder": fulfill_items, "trackingInfo": tracking_info}
             res_return = self.deploy_mutation(
