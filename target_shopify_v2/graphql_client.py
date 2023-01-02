@@ -70,7 +70,7 @@ class shopifyGraphQLV2Sink(RecordSink):
         res = res["data"]["draftOrderCreate"]["draftOrder"]
         # Check if order needs to be completed
         completed = self.complete_order(record, res, payload)
-        completed = {"data":{"draftOrderComplete":{"draftOrder":{"order":{"id":"gid://shopify/Order/4975640084700"}}}}}
+        # completed = {"data":{"draftOrderComplete":{"draftOrder":{"order":{"id":"gid://shopify/Order/4975640084700"}}}}}
         if (
             completed
             and "order" in completed["data"]["draftOrderComplete"]["draftOrder"]
