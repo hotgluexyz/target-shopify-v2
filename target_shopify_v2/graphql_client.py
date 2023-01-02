@@ -70,7 +70,7 @@ class shopifyGraphQLV2Sink(RecordSink):
         res = res["data"]["draftOrderCreate"]["draftOrder"]
         # Check if order needs to be completed
         completed = self.complete_order(record, res, payload)
-        # completed = {"data":{"draftOrderComplete":{"draftOrder":{"order":{"id":"gid://shopify/Order/4975640084700"}}}}}
+        completed = {"data":{"draftOrderComplete":{"draftOrder":{"order":{"id":"gid://shopify/Order/4975640084700"}}}}}
         if (
             completed
             and "order" in completed["data"]["draftOrderComplete"]["draftOrder"]
@@ -119,11 +119,7 @@ class shopifyGraphQLV2Sink(RecordSink):
                         for line_item in line_items:
                             fulfill_item["fulfillmentOrderId"] = line_item["node"]["id"]
                             fulfill_items.append(fulfill_item)
-                        tracking_info = order_details["data"]["order"]["fulfillments"][0]["trackingInfo"]
-                        if len(tracking_info) > 0:
-                            tracking_info = tracking_info[0]
-                        else:
-                            tracking_info = None
+                    tracking_info = {"company": record["carrier"] , "number": record["tracking_number"]}  
                     
             fulfillment_payload = {"lineItemsByFulfillmentOrder": fulfill_items, "trackingInfo": tracking_info}
             res_return = self.deploy_mutation(
