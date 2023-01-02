@@ -93,6 +93,11 @@ class shopifyGraphQLV2Sink(RecordSink):
                         fulfillment {
                             # Fulfillment fields
                             id
+                            trackingInfo {
+                                # TrackingInfo fields
+                                number
+                                company
+                            }
                         }
                         userErrors {
                                 field
@@ -102,6 +107,7 @@ class shopifyGraphQLV2Sink(RecordSink):
                 }
         """
             fulfill_items = []
+            tracking_info = None
             if "fulfilled" in record:
                 if record["fulfilled"] is True:
                     order_details = self.query_order(order_id)
@@ -113,7 +119,13 @@ class shopifyGraphQLV2Sink(RecordSink):
                         for line_item in line_items:
                             fulfill_item["fulfillmentOrderId"] = line_item["node"]["id"]
                             fulfill_items.append(fulfill_item)
-            fulfillment_payload = {"lineItemsByFulfillmentOrder": fulfill_items}
+                        tracking_info = order_details["data"]["order"]["fulfillments"][0]["trackingInfo"]
+                        if len(tracking_info) > 0:
+                            tracking_info = tracking_info[0]
+                        else:
+                            tracking_info = None
+                    
+            fulfillment_payload = {"lineItemsByFulfillmentOrder": fulfill_items, "trackingInfo": tracking_info}
             res_return = self.deploy_mutation(
                 mutation, {"fulfillment": fulfillment_payload}
             )
@@ -155,7 +167,12 @@ class shopifyGraphQLV2Sink(RecordSink):
                             }
                         }
                         fulfillments(first:50){
-                            id    
+                            id
+                            trackingInfo{
+                                number
+                                company
+
+                            }    
                         }
                         fulfillmentOrders(first:100){
                             edges{
