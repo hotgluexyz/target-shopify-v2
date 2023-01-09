@@ -40,50 +40,63 @@ class shopifyGraphQLV2Sink(RecordSink):
 
     def upload_order(self, record):
         mapping = UnifiedMapping()
-        if "customer_name" in record:
-            if record["customer_name"] is not None:
-                customer = self.query_customers(record["customer_name"])
-                if "data" in customer:
-                    if customer["data"] is not None:
-                        if "customers" in customer["data"]:
-                            if "edges" in customer["data"]["customers"]:
-                                if len(customer["data"]["customers"]["edges"]) > 0:
-                                    customer = customer["data"]["customers"]["edges"][
-                                        0
-                                    ]["node"]
-                                    record["customer_id"] = customer["id"]
-                                    if customer["email"]:
-                                        record["email"] = customer["email"]
-        payload = mapping.prepare_payload(record, "sale_orders", target="shopify")
-        payload = self.order_lookups(payload)
-        mutation = """ 
-                mutation draftOrderCreate($input: DraftOrderInput!) {
-                draftOrderCreate(input: $input) {
-                    draftOrder {
-                    id
+        if "order_number" in record:
+            self.update_order_by_number(record)
+        
+        if not "order_number" in record:
+            if "customer_name" in record:
+                if record["customer_name"] is not None:
+                    customer = self.query_customers(record["customer_name"])
+                    if "data" in customer:
+                        if customer["data"] is not None:
+                            if "customers" in customer["data"]:
+                                if "edges" in customer["data"]["customers"]:
+                                    if len(customer["data"]["customers"]["edges"]) > 0:
+                                        customer = customer["data"]["customers"]["edges"][
+                                            0
+                                        ]["node"]
+                                        record["customer_id"] = customer["id"]
+                                        if customer["email"]:
+                                            record["email"] = customer["email"]
+            payload = mapping.prepare_payload(record, "sale_orders", target="shopify")
+            payload = self.order_lookups(payload)
+            mutation = """ 
+                    mutation draftOrderCreate($input: DraftOrderInput!) {
+                    draftOrderCreate(input: $input) {
+                        draftOrder {
+                        id
+                        }
                     }
-                }
-                }
-        """
-        res = self.deploy_mutation(mutation, {"input": payload})
-        self.post_message(res)
-        res = res["data"]["draftOrderCreate"]["draftOrder"]
-        # Check if order needs to be completed
-        completed = self.complete_order(record, res, payload)
-        # completed = {"data":{"draftOrderComplete":{"draftOrder":{"order":{"id":"gid://shopify/Order/4975640084700"}}}}}
-        if (
-            completed
-            and "order" in completed["data"]["draftOrderComplete"]["draftOrder"]
-        ):
-            # Check and fulfil order if there were no errors
-            self.fulfil_order(
-                record,
-                completed["data"]["draftOrderComplete"]["draftOrder"]["order"]["id"],
-                payload,
-            )
+                    }
+            """
+            res = self.deploy_mutation(mutation, {"input": payload})
+            self.post_message(res)
+            res = res["data"]["draftOrderCreate"]["draftOrder"]
+            # Check if order needs to be completed
+            completed = self.complete_order(record, res, payload)
+            # completed = {"data":{"draftOrderComplete":{"draftOrder":{"order":{"id":"gid://shopify/Order/4975640084700"}}}}}
+            if (
+                completed
+                and "order" in completed["data"]["draftOrderComplete"]["draftOrder"]
+            ):
+                # Check and fulfil order if there were no errors
+                self.fulfil_order(
+                    record,
+                    completed["data"]["draftOrderComplete"]["draftOrder"]["order"]["id"],
+                    payload,
+                )
 
-        # Check if order is fully paid
-        # self.mark_order_paid(record,res,payload)
+            # Check if order is fully paid
+            # self.mark_order_paid(record,res,payload)
+
+    def update_order_by_number(self, record):
+        order = self.query_order_by_name(record.get("order_number"))
+        self.fulfil_order(
+            record,
+            order['data']['orders']['edges'][0]['node']['id']
+        )
+        
+
 
     def fulfil_order(self, record, order_id, payload=None):
         try:
@@ -375,6 +388,20 @@ class shopifyGraphQLV2Sink(RecordSink):
                         id
                         displayName
                         email
+                    }
+                }
+                }
+                }  
+        """
+        return self.shopify_query(query, {"filter": filter})
+    
+    def query_order_by_name(self, filter):
+        query = """ 
+               query($filter:String){
+                orders(first: 10, query: $filter) {
+                    edges {
+                    node {
+                        id
                     }
                 }
                 }
