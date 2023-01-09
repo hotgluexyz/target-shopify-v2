@@ -41,11 +41,11 @@ class shopifyGraphQLV2Sink(RecordSink):
     def upload_order(self, record):
         mapping = UnifiedMapping()
         
-        if "id" and "order_number" in record:   
+        if "id" in record and "order_number" in record:   
             self.update_order_by_id(record)
-        if "id" and not "order_number" in record:
+        if "id" in record and not "order_number" in record:
             self.update_order_by_id(record)
-        if not "id" and "order_number" in record:
+        if "id" not in record and "order_number" in record:
             self.update_order_by_number(record)
         
         if not "id" in record:
