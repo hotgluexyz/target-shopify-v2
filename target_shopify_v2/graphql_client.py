@@ -18,7 +18,8 @@ class shopifyGraphQLV2Sink(RecordSink):
 
     def get_http_headers(self):
         headers = {}
-        headers["X-Shopify-Access-Token"] = str(self.config.get("api_key"))
+        # NOTE: We are defaulting to using OAuth access token first, then falling back to API Key
+        headers["X-Shopify-Access-Token"] = str(self.config.get("access_token", self.config.get("api_key")))
         headers["Content-Type"] = "application/json"
         return headers
 

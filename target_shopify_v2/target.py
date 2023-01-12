@@ -11,8 +11,7 @@ class TargetTargetShopifyV2(Target):
 
     name = "target-shopify-v2"
     config_jsonschema = th.PropertiesList(
-        th.Property("shop", th.StringType, required=True),
-        th.Property("api_key", th.StringType, required=True),
+        th.Property("shop", th.StringType, required=True)
     ).to_dict()
     default_sink_class = TargetShopifyV2Sink
 
