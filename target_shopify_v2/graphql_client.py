@@ -41,16 +41,10 @@ class shopifyGraphQLV2Sink(RecordSink):
 
     def upload_order(self, record):
         mapping = UnifiedMapping()
-        
-        if "id" in record and "order_number" in record:   
-            self.update_order_by_id(record)
-        if "id" in record and not "order_number" in record:
-            self.update_order_by_id(record)
-        if "id" not in record and "order_number" in record:
+        if "id" in record:
             self.update_order_by_number(record)
         
         if not "id" in record:
-            if not "order_number" in record:
                 if "customer_name" in record:
                     if record["customer_name"] is not None:
                         customer = self.query_customers(record["customer_name"])
@@ -97,19 +91,15 @@ class shopifyGraphQLV2Sink(RecordSink):
             # self.mark_order_paid(record,res,payload)
 
     def update_order_by_number(self, record):
-        order = self.query_order_by_name(record.get("order_number"))
+
+        order = '#' + record.get("id")
+        order = self.query_order_by_name(order)
         self.fulfil_order(
             record,
             order['data']['orders']['edges'][0]['node']['id']
         )
     
-    def update_order_by_id(self, record):
-        order = self.query_order(record.get("id"))
-        self.fulfil_order(
-            record,
-            order['data']['order']['id'],
-        )
-        
+   
     def fulfil_order(self, record, order_id, payload=None):
         try:
             mutation = """ 
