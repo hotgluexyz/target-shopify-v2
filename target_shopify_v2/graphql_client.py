@@ -9,9 +9,11 @@ import requests
 from singer_sdk.sinks import RecordSink
 
 from target_shopify_v2.mapping import UnifiedMapping
+from target_hotglue.client import HotglueSink
+from datetime import datetime
 
 
-class shopifyGraphQLV2Sink(RecordSink):
+class shopifyGraphQLV2Sink(HotglueSink):
     @property
     def base_url(self):
         return f"https://{self.config.get('shop')}.myshopify.com/admin/api/2021-07/graphql.json"
@@ -37,6 +39,7 @@ class shopifyGraphQLV2Sink(RecordSink):
             json={"query": query, "variables": variables},
             headers=self.get_http_headers(),
         )
+        self.logger.debug(f"DEBUG REQUEST- url:{self.base_url} query: {query}, variables: {variables}")
         return res.json()
 
     def upload_order(self, record):
@@ -585,5 +588,12 @@ class shopifyGraphQLV2Sink(RecordSink):
 
     def post_message(self, res):
         if "errors" in res:
+            self.update_state({"error_response": res["errors"]})
             raise Exception(res["errors"])
         print(json.dumps(res))
+
+    def preprocess_record(self, record: dict, context: dict) -> dict:
+        for key, value in record.items():
+            if isinstance(value, datetime):
+                record[key] = value.strftime("%Y-%m-%dT%H:%M:%SZ")
+        return record
