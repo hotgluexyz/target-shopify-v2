@@ -80,7 +80,6 @@ class shopifyGraphQLV2Sink(HotglueSink):
                         }
                 """
                 res = self.deploy_mutation(mutation, {"input": payload})
-                self.post_message(res)
                 res = res["data"]["draftOrderCreate"]["draftOrder"]
                 # Check if order needs to be completed
                 completed = self.complete_order(record, res, payload)
@@ -95,6 +94,8 @@ class shopifyGraphQLV2Sink(HotglueSink):
                         completed["data"]["draftOrderComplete"]["draftOrder"]["order"]["id"],
                         payload,
                     )
+                
+                return completed
 
             # Check if order is fully paid
             # self.mark_order_paid(record,res,payload)
@@ -324,8 +325,6 @@ class shopifyGraphQLV2Sink(HotglueSink):
                 }
                 }"""
             res = self.deploy_mutation(mutation, {"input": payload})
-            self.post_message(res)
-
             if variants_update:
                 mutation = """ 
                     mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
@@ -339,9 +338,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
                         }
                     }
                     }"""
-                res = self.deploy_mutation(mutation, {"productId": payload["id"], "variants": variants_update})
-                self.post_message(res)
-            
+                res = self.deploy_mutation(mutation, {"productId": payload["id"], "variants": variants_update})            
             if variants_create:
                 mutation = """ 
                     mutation productVariantsBulkCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
@@ -356,8 +353,6 @@ class shopifyGraphQLV2Sink(HotglueSink):
                     }
                     }"""
                 res = self.deploy_mutation(mutation, {"productId": payload["id"], "variants": variants_create})
-                self.post_message(res)
-
         else:
             mutation = """ 
                     mutation productCreate($input: ProductInput!) {
@@ -368,7 +363,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
                     }
                     }"""
             res = self.deploy_mutation(mutation, {"input": payload})
-            self.post_message(res)
+        return res
 
     def order_lookups(self, payload):
         lineitems = payload["lineItems"]
@@ -570,7 +565,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
             mutation,
             {"input": {"inventoryLevelId": level_id, "availableDelta": quantity}},
         )
-        self.post_message(res)
+        return res
 
     def update_inventory(self, item):
         operation = "add"
@@ -585,6 +580,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
             quantity = int(item["quantity"])
         if "inventory_level" in product:
             self.update_product_mutation(product["inventory_level"]["id"], quantity)
+            return product["inventory_level"]["id"]
 
     def post_message(self, res):
         if "errors" in res:

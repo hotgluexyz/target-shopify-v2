@@ -10,9 +10,10 @@ class SalesOrdersSink(shopifyGraphQLV2Sink):
         """Process the record."""
         state_updates = dict()
         if record:
-            self.upload_order(record)
-            self.logger.info(f"Returning {id}, True, {state_updates}")
-            return id, True, state_updates
+            res = self.upload_order(record)
+            sales_order_id = res["data"]["draftOrderComplete"]["draftOrder"]["order"]["id"]
+            self.logger.info(f"Returning {sales_order_id}, True, {state_updates}")
+            return sales_order_id, True, state_updates
 
 class ProductsSink(shopifyGraphQLV2Sink):
     name = "Products"
@@ -20,9 +21,10 @@ class ProductsSink(shopifyGraphQLV2Sink):
     def upsert_record(self, record: dict, context: dict) -> None:
         state_updates = dict()
         if record:
-            self.upload_product(record)
-            self.logger.info(f"Returning {id}, True, {state_updates}")
-            return id, True, state_updates
+            res = self.upload_product(record)
+            product_id = res.get("data", {}).get("productCreate", {}).get("product", {}).get("id")
+            self.logger.info(f"Returning {product_id}, True, {state_updates}")
+            return product_id, True, state_updates
 
 class UpdateInventorySink(shopifyGraphQLV2Sink):
     name = "UpdateInventory"
@@ -30,6 +32,6 @@ class UpdateInventorySink(shopifyGraphQLV2Sink):
     def upsert_record(self, record: dict, context: dict) -> None:
         state_updates = dict()
         if record:
-            self.update_inventory(record)
-            self.logger.info(f"Returning {id}, True, {state_updates}")
-            return id, True, state_updates
+            res = self.update_inventory(record)
+            self.logger.info(f"Returning {res}, True, {state_updates}")
+            return res, True, state_updates
