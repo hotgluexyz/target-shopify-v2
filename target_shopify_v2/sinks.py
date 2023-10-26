@@ -11,7 +11,7 @@ class SalesOrdersSink(shopifyGraphQLV2Sink):
         state_updates = dict()
         if record:
             res = self.upload_order(record)
-            sales_order_id = res["data"]["draftOrderComplete"]["draftOrder"]["order"]["id"]
+            sales_order_id = res["id"]
             self.logger.info(f"Returning {sales_order_id}, True, {state_updates}")
             return sales_order_id, True, state_updates
 

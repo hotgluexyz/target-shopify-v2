@@ -95,7 +95,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
                         payload,
                     )
                 
-                return completed
+                return res
 
             # Check if order is fully paid
             # self.mark_order_paid(record,res,payload)
@@ -526,15 +526,16 @@ class shopifyGraphQLV2Sink(HotglueSink):
         if "errors" in detail:
             return None
         product = detail
-
+        inventory_item = None
         if detail['data'].get('productVariant'):
             inventory_item = detail['data']['productVariant']['inventoryItem']
         
-        elif len(detail["data"]["products"]["edges"]) > 0:
+        elif detail["data"].get("products", {}).get("edges", []):
             product = detail["data"]["products"]["edges"][0]["node"]
             if len(product["variants"]["edges"]) > 0:
                 inventory_item = product["variants"]["edges"][0]["node"]["inventoryItem"]
-        if len(inventory_item["inventoryLevels"]["edges"]) > 0:
+
+        if inventory_item and len(inventory_item["inventoryLevels"]["edges"]) > 0:
             product["inventory_level"] = inventory_item["inventoryLevels"][
                 "edges"
             ][0]["node"]
