@@ -11,6 +11,7 @@ from singer_sdk.sinks import RecordSink
 from target_shopify_v2.mapping import UnifiedMapping
 from target_hotglue.client import HotglueSink
 from datetime import datetime
+from singer_sdk.exceptions import FatalAPIError, RetriableAPIError
 
 
 class shopifyGraphQLV2Sink(HotglueSink):
@@ -33,6 +34,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
             json={"query": mutation, "variables": variables},
             headers=self.get_http_headers(),
         )
+        self.validate_response(res)
         return res.json()
 
     def shopify_query(self, query, variables, input_name="input"):
@@ -42,6 +44,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
             headers=self.get_http_headers(),
         )
         self.logger.debug(f"DEBUG REQUEST- url:{self.base_url} query: {query}, variables: {variables}")
+        self.validate_response(res)
         return res.json()
 
     def upload_order(self, record):
@@ -613,3 +616,17 @@ class shopifyGraphQLV2Sink(HotglueSink):
             if isinstance(value, datetime):
                 record[key] = value.strftime("%Y-%m-%dT%H:%M:%SZ")
         return record
+    
+    def validate_response(self, response: requests.Response) -> None:
+        """Validate HTTP response."""
+        if response.json().get("errors"):
+            raise FatalAPIError(response.text)
+        if response.status_code in [429] or 500 <= response.status_code < 600:
+            msg = self.response_error_message(response)
+            raise RetriableAPIError(msg, response)
+        elif 400 <= response.status_code < 500:
+            try:
+                msg = response.text
+            except:
+                msg = self.response_error_message(response)
+            raise FatalAPIError(msg)
