@@ -114,7 +114,9 @@ class shopifyGraphQLV2Sink(HotglueSink):
 
     def update_order_by_number(self, record):
         order = self.query_order_by_name(record.get("order_number"))
-        self.fulfil_order(record, order["data"]["orders"]["edges"][0]["node"]["id"])
+        order_id = order["data"]["orders"]["edges"][0].get("node", {}).get("id")
+        if order_id:
+            self.fulfil_order(record, order["data"]["orders"]["edges"][0].get["node"]["id"])
 
     def update_order_by_id(self, record):
         order = self.query_order(record.get("id"))
