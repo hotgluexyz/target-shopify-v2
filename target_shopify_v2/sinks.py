@@ -10,10 +10,9 @@ class SalesOrdersSink(shopifyGraphQLV2Sink):
         """Process the record."""
         state_updates = dict()
         if record:
-            res = self.upload_order(record)
-            sales_order_id = res["id"]
-            self.logger.info(f"Returning {sales_order_id}, True, {state_updates}")
-            return sales_order_id, True, state_updates
+            order_id = self.upload_order(record)
+            self.logger.info(f"Returning {order_id}, True, {state_updates}")
+            return order_id, True, state_updates
 
 class ProductsSink(shopifyGraphQLV2Sink):
     name = "Products"

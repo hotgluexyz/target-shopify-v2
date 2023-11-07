@@ -50,14 +50,11 @@ class shopifyGraphQLV2Sink(HotglueSink):
     def upload_order(self, record):
         mapping = UnifiedMapping()
 
-        if "id" in record and "order_number" in record:
-            self.update_order_by_id(record)
-        if "id" in record and not "order_number" in record:
-            self.update_order_by_id(record)
-        if "id" not in record and "order_number" in record:
-            self.update_order_by_number(record)
-
-        if not "id" in record:
+        if "id" in record:
+            return self.update_order_by_id(record)
+        elif "order_number" in record:
+            return self.update_order_by_number(record)
+        else:
             if not "order_number" in record:
                 if "customer_name" in record:
                     if record["customer_name"] is not None:
@@ -89,26 +86,33 @@ class shopifyGraphQLV2Sink(HotglueSink):
                         }
                         }
                 """
-                res = self.deploy_mutation(mutation, {"input": payload})
-                res = res["data"]["draftOrderCreate"]["draftOrder"]
-                # Check if order needs to be completed
-                completed = self.complete_order(record, res, payload)
-                # completed = {"data":{"draftOrderComplete":{"draftOrder":{"order":{"id":"gid://shopify/Order/4975640084700"}}}}}
+                draft_order = self.deploy_mutation(mutation, {"input": payload})
+                draft_order = draft_order["data"]["draftOrderCreate"]["draftOrder"]
+                # Complete the draft order
+                order_status = record.get("status")
+                params = {"id": draft_order["id"]}
+
+                #1.Complete draftorder - create order
+                # if status is active create order with pending payment
+                if order_status in ["active"]:
+                    params = {"id": draft_order["id"], "paymentPending": True}
+                # if status is completed create order as completed
+                elif order_status in ["completed"]:
+                    params = {"id": draft_order["id"]}
+                order = self.complete_draft_order(params)
+                order_id = order["data"]["draftOrderComplete"]["draftOrder"]["order"]["id"]
+                #2. if record["fulfilled"] == true, mark order as fulfilled
                 if (
-                    completed
-                    and "order" in completed["data"]["draftOrderComplete"]["draftOrder"]
+                    order
+                    and "order" in order["data"]["draftOrderComplete"]["draftOrder"]
                 ):
                     # Check and fulfil order if there were no errors
                     self.fulfil_order(
                         record,
-                        completed["data"]["draftOrderComplete"]["draftOrder"]["order"][
-                            "id"
-                        ],
+                        order_id,
                         payload,
                     )
-                
-                return res
-
+                return order_id
             # Check if order is fully paid
             # self.mark_order_paid(record,res,payload)
 
@@ -117,13 +121,16 @@ class shopifyGraphQLV2Sink(HotglueSink):
         order_id = order["data"]["orders"]["edges"][0].get("node", {}).get("id")
         if order_id:
             self.fulfil_order(record, order["data"]["orders"]["edges"][0].get["node"]["id"])
+        return order_id
 
     def update_order_by_id(self, record):
         order = self.query_order(record.get("id"))
+        order_id = order["data"]["order"]["id"],
         self.fulfil_order(
             record,
-            order["data"]["order"]["id"],
+            order_id,
         )
+        return order_id
 
     def fulfil_order(self, record, order_id, payload=None):
         try:
@@ -227,10 +234,31 @@ class shopifyGraphQLV2Sink(HotglueSink):
                 } 
         """
         return self.shopify_query(query, {"id": order_id})
-
-    def complete_order(self, record, res, payload=None):
+    
+    def complete_draft_order(self, params):
+        #completes a draft order to create an order
         res_return = {}
-        mutation = """ 
+        #create order with pending payment
+        if params.get("paymentPending"):
+            mutation = """ 
+                mutation draftOrderComplete($id: ID!, $paymentPending: Boolean) {
+                    draftOrderComplete(id: $id, paymentPending: $paymentPending) {
+                        draftOrder {
+                        id
+                        order {
+                            id
+                        }
+                        }
+                        userErrors {
+                            field
+                            message
+                        }
+                    }
+                }
+            """
+        else:
+        #create order as completed
+            mutation = """ 
                 mutation draftOrderComplete($id: ID!) {
                     draftOrderComplete(id: $id) {
                         draftOrder {
@@ -245,11 +273,9 @@ class shopifyGraphQLV2Sink(HotglueSink):
                             }
                     }
                 }
-        """
-        if "status" in record:
-            if record["status"] == "completed":
-                res_return = self.deploy_mutation(mutation, {"id": res["id"]})
-                self.post_message(res_return)
+            """
+        res_return = self.deploy_mutation(mutation, params)
+        self.post_message(res_return)
         return res_return
 
     def mark_order_paid(self, record, res, payload=None):
