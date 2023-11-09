@@ -9,9 +9,12 @@ import requests
 from singer_sdk.sinks import RecordSink
 
 from target_shopify_v2.mapping import UnifiedMapping
+from target_hotglue.client import HotglueSink
+from datetime import datetime
+from singer_sdk.exceptions import FatalAPIError, RetriableAPIError
 
 
-class shopifyGraphQLV2Sink(RecordSink):
+class shopifyGraphQLV2Sink(HotglueSink):
     @property
     def base_url(self):
         return f"https://{self.config.get('shop')}.myshopify.com/admin/api/2021-07/graphql.json"
@@ -31,6 +34,7 @@ class shopifyGraphQLV2Sink(RecordSink):
             json={"query": mutation, "variables": variables},
             headers=self.get_http_headers(),
         )
+        self.validate_response(res)
         return res.json()
 
     def shopify_query(self, query, variables, input_name="input"):
@@ -39,19 +43,18 @@ class shopifyGraphQLV2Sink(RecordSink):
             json={"query": query, "variables": variables},
             headers=self.get_http_headers(),
         )
+        self.logger.debug(f"DEBUG REQUEST- url:{self.base_url} query: {query}, variables: {variables}")
+        self.validate_response(res)
         return res.json()
 
     def upload_order(self, record):
         mapping = UnifiedMapping()
 
-        if "id" in record and "order_number" in record:
-            self.update_order_by_id(record)
-        if "id" in record and not "order_number" in record:
-            self.update_order_by_id(record)
-        if "id" not in record and "order_number" in record:
-            self.update_order_by_number(record)
-
-        if not "id" in record:
+        if "id" in record:
+            return self.update_order_by_id(record)
+        elif "order_number" in record:
+            return self.update_order_by_number(record)
+        else:
             if not "order_number" in record:
                 if "customer_name" in record:
                     if record["customer_name"] is not None:
@@ -83,38 +86,51 @@ class shopifyGraphQLV2Sink(RecordSink):
                         }
                         }
                 """
-                res = self.deploy_mutation(mutation, {"input": payload})
-                self.post_message(res)
-                res = res["data"]["draftOrderCreate"]["draftOrder"]
-                # Check if order needs to be completed
-                completed = self.complete_order(record, res, payload)
-                # completed = {"data":{"draftOrderComplete":{"draftOrder":{"order":{"id":"gid://shopify/Order/4975640084700"}}}}}
+                draft_order = self.deploy_mutation(mutation, {"input": payload})
+                draft_order = draft_order["data"]["draftOrderCreate"]["draftOrder"]
+                # Complete the draft order
+                order_status = record.get("status")
+                params = {"id": draft_order["id"]}
+
+                #1.Complete draftorder - create order
+                # if status is active create order with pending payment
+                if order_status in ["active"]:
+                    params = {"id": draft_order["id"], "paymentPending": True}
+                # if status is completed create order as completed
+                elif order_status in ["completed"]:
+                    params = {"id": draft_order["id"]}
+                order = self.complete_draft_order(params)
+                order_id = order["data"]["draftOrderComplete"]["draftOrder"]["order"]["id"]
+                #2. if record["fulfilled"] == true, mark order as fulfilled
                 if (
-                    completed
-                    and "order" in completed["data"]["draftOrderComplete"]["draftOrder"]
+                    order
+                    and "order" in order["data"]["draftOrderComplete"]["draftOrder"]
                 ):
                     # Check and fulfil order if there were no errors
                     self.fulfil_order(
                         record,
-                        completed["data"]["draftOrderComplete"]["draftOrder"]["order"][
-                            "id"
-                        ],
+                        order_id,
                         payload,
                     )
-
+                return order_id
             # Check if order is fully paid
             # self.mark_order_paid(record,res,payload)
 
     def update_order_by_number(self, record):
         order = self.query_order_by_name(record.get("order_number"))
-        self.fulfil_order(record, order["data"]["orders"]["edges"][0]["node"]["id"])
+        order_id = order["data"]["orders"]["edges"][0].get("node", {}).get("id")
+        if order_id:
+            self.fulfil_order(record, order["data"]["orders"]["edges"][0].get["node"]["id"])
+        return order_id
 
     def update_order_by_id(self, record):
         order = self.query_order(record.get("id"))
+        order_id = order["data"]["order"]["id"],
         self.fulfil_order(
             record,
-            order["data"]["order"]["id"],
+            order_id,
         )
+        return order_id
 
     def fulfil_order(self, record, order_id, payload=None):
         try:
@@ -218,10 +234,31 @@ class shopifyGraphQLV2Sink(RecordSink):
                 } 
         """
         return self.shopify_query(query, {"id": order_id})
-
-    def complete_order(self, record, res, payload=None):
+    
+    def complete_draft_order(self, params):
+        #completes a draft order to create an order
         res_return = {}
-        mutation = """ 
+        #create order with pending payment
+        if params.get("paymentPending"):
+            mutation = """ 
+                mutation draftOrderComplete($id: ID!, $paymentPending: Boolean) {
+                    draftOrderComplete(id: $id, paymentPending: $paymentPending) {
+                        draftOrder {
+                        id
+                        order {
+                            id
+                        }
+                        }
+                        userErrors {
+                            field
+                            message
+                        }
+                    }
+                }
+            """
+        else:
+        #create order as completed
+            mutation = """ 
                 mutation draftOrderComplete($id: ID!) {
                     draftOrderComplete(id: $id) {
                         draftOrder {
@@ -236,11 +273,9 @@ class shopifyGraphQLV2Sink(RecordSink):
                             }
                     }
                 }
-        """
-        if "status" in record:
-            if record["status"] == "completed":
-                res_return = self.deploy_mutation(mutation, {"id": res["id"]})
-                self.post_message(res_return)
+            """
+        res_return = self.deploy_mutation(mutation, params)
+        self.post_message(res_return)
         return res_return
 
     def mark_order_paid(self, record, res, payload=None):
@@ -333,8 +368,6 @@ class shopifyGraphQLV2Sink(RecordSink):
                 }
                 }"""
             res = self.deploy_mutation(mutation, {"input": payload})
-            self.post_message(res)
-
             if variants_update:
                 mutation = """ 
                     mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
@@ -348,11 +381,7 @@ class shopifyGraphQLV2Sink(RecordSink):
                         }
                     }
                     }"""
-                res = self.deploy_mutation(
-                    mutation, {"productId": payload["id"], "variants": variants_update}
-                )
-                self.post_message(res)
-
+                res = self.deploy_mutation(mutation, {"productId": payload["id"], "variants": variants_update})            
             if variants_create:
                 mutation = """ 
                     mutation productVariantsBulkCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
@@ -366,11 +395,7 @@ class shopifyGraphQLV2Sink(RecordSink):
                         }
                     }
                     }"""
-                res = self.deploy_mutation(
-                    mutation, {"productId": payload["id"], "variants": variants_create}
-                )
-                self.post_message(res)
-
+                res = self.deploy_mutation(mutation, {"productId": payload["id"], "variants": variants_create})
         else:
             mutation = """ 
                     mutation productCreate($input: ProductInput!) {
@@ -381,7 +406,7 @@ class shopifyGraphQLV2Sink(RecordSink):
                     }
                     }"""
             res = self.deploy_mutation(mutation, {"input": payload})
-            self.post_message(res)
+        return res
 
     def order_lookups(self, payload):
         lineitems = payload["lineItems"]
@@ -547,20 +572,19 @@ class shopifyGraphQLV2Sink(RecordSink):
         if "errors" in detail:
             return None
         product = detail
-
-        if detail["data"].get("productVariant"):
-            inventory_item = detail["data"]["productVariant"]["inventoryItem"]
-
-        elif len(detail["data"]["products"]["edges"]) > 0:
+        inventory_item = None
+        if detail['data'].get('productVariant'):
+            inventory_item = detail['data']['productVariant']['inventoryItem']
+        
+        elif detail["data"].get("products", {}).get("edges", []):
             product = detail["data"]["products"]["edges"][0]["node"]
             if len(product["variants"]["edges"]) > 0:
-                inventory_item = product["variants"]["edges"][0]["node"][
-                    "inventoryItem"
-                ]
-        if len(inventory_item["inventoryLevels"]["edges"]) > 0:
-            product["inventory_level"] = inventory_item["inventoryLevels"]["edges"][0][
-                "node"
-            ]
+                inventory_item = product["variants"]["edges"][0]["node"]["inventoryItem"]
+
+        if inventory_item and len(inventory_item["inventoryLevels"]["edges"]) > 0:
+            product["inventory_level"] = inventory_item["inventoryLevels"][
+                "edges"
+            ][0]["node"]
         return product
 
     def update_product_mutation(
@@ -590,7 +614,7 @@ class shopifyGraphQLV2Sink(RecordSink):
             mutation,
             {"input": {"inventoryLevelId": level_id, update_field: quantity}},
         )
-        self.post_message(res)
+        return res
 
     def update_inventory(self, item):
         operation = "add"
@@ -601,31 +625,36 @@ class shopifyGraphQLV2Sink(RecordSink):
 
         if "operation" in item:
             operation = item["operation"]
-            if operation == "subtract":
-                quantity = int(f"-{item['quantity']}")
-            elif operation == "add":
-                quantity = int(item["quantity"])
-            elif operation == "set":
-                quantity = int(item["quantity"])
-                # Get current available quantity
-                available_quantity = product.get("inventory_level", {}).get("available")
-                #Calculate quantity delta
-                quantity = quantity - available_quantity
-            else:
-                # Retain add by default behavior
-                quantity = int(item["quantity"])
-
-            if quantity:
-                if "inventory_level" in product:
-                    self.update_product_mutation(
-                        product["inventory_level"]["id"], quantity
-                    )
-            else:
-                self.logger.warn(
-                    f"No quantity set for {product.get('title')}. Skipping..."
-                )
+        if operation == "subtract":
+            quantity = int(f"-{item['quantity']}")
+        else:
+            quantity = int(item["quantity"])
+        if "inventory_level" in product:
+            self.update_product_mutation(product["inventory_level"]["id"], quantity)
+            return product["inventory_level"]["id"]
 
     def post_message(self, res):
         if "errors" in res:
+            self.update_state({"error_response": res["errors"]})
             raise Exception(res["errors"])
         print(json.dumps(res))
+
+    def preprocess_record(self, record: dict, context: dict) -> dict:
+        for key, value in record.items():
+            if isinstance(value, datetime):
+                record[key] = value.strftime("%Y-%m-%dT%H:%M:%SZ")
+        return record
+    
+    def validate_response(self, response: requests.Response) -> None:
+        """Validate HTTP response."""
+        if response.json().get("errors"):
+            raise FatalAPIError(response.text)
+        if response.status_code in [429] or 500 <= response.status_code < 600:
+            msg = self.response_error_message(response)
+            raise RetriableAPIError(msg, response)
+        elif 400 <= response.status_code < 500:
+            try:
+                msg = response.text
+            except:
+                msg = self.response_error_message(response)
+            raise FatalAPIError(msg)

@@ -2,18 +2,22 @@
 
 from singer_sdk import typing as th
 from singer_sdk.target_base import Target
+from target_hotglue.target import TargetHotglue
+from target_shopify_v2.sinks import (
+    SalesOrdersSink,
+    UpdateInventorySink,
+    ProductsSink
+)
 
-from target_shopify_v2.sinks import TargetShopifyV2Sink
 
-
-class TargetTargetShopifyV2(Target):
+class TargetTargetShopifyV2(TargetHotglue):
     """Sample target for TargetShopifyV2."""
 
     name = "target-shopify-v2"
     config_jsonschema = th.PropertiesList(
         th.Property("shop", th.StringType, required=True)
     ).to_dict()
-    default_sink_class = TargetShopifyV2Sink
+    SINK_TYPES = [SalesOrdersSink, UpdateInventorySink, ProductsSink]
 
 
 if __name__ == "__main__":
