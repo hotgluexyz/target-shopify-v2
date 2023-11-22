@@ -74,7 +74,7 @@ class shopifyGraphQLV2Sink(RecordSink):
                     record, "sale_orders", target="shopify"
                 )
                 payload = self.order_lookups(payload)
-                mutation = """ 
+                mutation = """
                         mutation draftOrderCreate($input: DraftOrderInput!) {
                         draftOrderCreate(input: $input) {
                             draftOrder {
@@ -118,7 +118,7 @@ class shopifyGraphQLV2Sink(RecordSink):
 
     def fulfil_order(self, record, order_id, payload=None):
         try:
-            mutation = """ 
+            mutation = """
                 mutation fulfillmentCreateV2($fulfillment: FulfillmentV2Input!) {
                 fulfillmentCreateV2(fulfillment: $fulfillment) {
                         fulfillment {
@@ -167,7 +167,7 @@ class shopifyGraphQLV2Sink(RecordSink):
             raise Exception
 
     def query_sku(self, sku):
-        query = """ 
+        query = """
             query tapShopify($first: Int, $query: String) {
                 productVariants(first: $first, query: $query) {
                     edges {
@@ -185,7 +185,7 @@ class shopifyGraphQLV2Sink(RecordSink):
         return self.shopify_query(query, {"first": 1, "query": sku})
 
     def query_order(self, order_id):
-        query = """ 
+        query = """
                 query($id:ID!){
                     order(id: $id) {
                         name
@@ -205,7 +205,7 @@ class shopifyGraphQLV2Sink(RecordSink):
                                 number
                                 company
 
-                            }    
+                            }
                         }
                         fulfillmentOrders(first:100){
                             edges{
@@ -215,13 +215,13 @@ class shopifyGraphQLV2Sink(RecordSink):
                             }
                         }
                     }
-                } 
+                }
         """
         return self.shopify_query(query, {"id": order_id})
 
     def complete_order(self, record, res, payload=None):
         res_return = {}
-        mutation = """ 
+        mutation = """
                 mutation draftOrderComplete($id: ID!) {
                     draftOrderComplete(id: $id) {
                         draftOrder {
@@ -244,13 +244,13 @@ class shopifyGraphQLV2Sink(RecordSink):
         return res_return
 
     def mark_order_paid(self, record, res, payload=None):
-        mutation = """ 
+        mutation = """
                 mutation draftOrderComplete($input: OrderMarkAsPaidInput!) {
                     orderMarkAsPaid(input: $input) {
                         	order {
                                 id
                             }
-                            
+
                     }
                 }
         """
@@ -324,7 +324,7 @@ class shopifyGraphQLV2Sink(RecordSink):
                     else:
                         variants_create.append(variant)
 
-            mutation = """ 
+            mutation = """
                 mutation productUpdate($input: ProductInput!) {
                 productUpdate(input: $input) {
                     product {
@@ -336,7 +336,7 @@ class shopifyGraphQLV2Sink(RecordSink):
             self.post_message(res)
 
             if variants_update:
-                mutation = """ 
+                mutation = """
                     mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
                     productVariantsBulkUpdate(productId: $productId, variants: $variants) {
                         product
@@ -354,7 +354,7 @@ class shopifyGraphQLV2Sink(RecordSink):
                 self.post_message(res)
 
             if variants_create:
-                mutation = """ 
+                mutation = """
                     mutation productVariantsBulkCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
                     productVariantsBulkCreate(productId: $productId, variants: $variants) {
                         product
@@ -372,7 +372,7 @@ class shopifyGraphQLV2Sink(RecordSink):
                 self.post_message(res)
 
         else:
-            mutation = """ 
+            mutation = """
                     mutation productCreate($input: ProductInput!) {
                     productCreate(input: $input) {
                         product {
@@ -408,7 +408,7 @@ class shopifyGraphQLV2Sink(RecordSink):
         return payload
 
     def query_customers(self, filter):
-        query = """ 
+        query = """
                 query($filter:String){
                 customers(first: 10, query: $filter) {
                     edges {
@@ -419,12 +419,12 @@ class shopifyGraphQLV2Sink(RecordSink):
                     }
                 }
                 }
-                }  
+                }
         """
         return self.shopify_query(query, {"filter": filter})
 
     def query_order_by_name(self, filter):
-        query = """ 
+        query = """
                query($filter:String){
                 orders(first: 10, query: $filter) {
                     edges {
@@ -433,12 +433,12 @@ class shopifyGraphQLV2Sink(RecordSink):
                     }
                 }
                 }
-                }  
+                }
         """
         return self.shopify_query(query, {"filter": filter})
 
     def query_variants(self, filter):
-        query = """ 
+        query = """
                 query($filter:String){
                 productVariants(first: 10, query: $filter) {
                     edges {
@@ -449,12 +449,12 @@ class shopifyGraphQLV2Sink(RecordSink):
                     }
                 }
                 }
-                }  
+                }
         """
         return self.shopify_query(query, {"filter": filter})
 
     def query_locations(self, filter):
-        query = """ 
+        query = """
                 query($filter:String){
                 locations(first: 25, query: $filter) {
                     edges {
@@ -465,15 +465,15 @@ class shopifyGraphQLV2Sink(RecordSink):
                     }
                 }
                 }
-                }  
+                }
         """
         return self.shopify_query(query, {"filter": filter})
 
-    def query_pducts(self, filter):
+    def query_products(self, filter):
         if "variant_id" in filter:
             query = """
                 query tapShopify($id: ID!) {
-                    productVariant(id: $id) {  
+                    productVariant(id: $id) {
                         id
                         product {
                             id
@@ -498,7 +498,7 @@ class shopifyGraphQLV2Sink(RecordSink):
                 {"id": "gid://shopify/ProductVariant/" + re.findall("\d+", filter)[0]},
             )
         else:
-            query = """           
+            query = """
                 query($filter:String){
                     products(first: 10, query: $filter) {
                         edges {
@@ -526,11 +526,11 @@ class shopifyGraphQLV2Sink(RecordSink):
                                     }
                                 }
                             }
-                            
+
                         }
                     }
                 }
-                }  
+                }
             """
             return self.shopify_query(query, {"filter": filter})
 
@@ -542,32 +542,44 @@ class shopifyGraphQLV2Sink(RecordSink):
         elif len(item["product_name"]) > 0:
             return {"key": "title", "val": item["product_name"]}
 
-    def extract_product(self, detail):
-        product = None
+    def get_inventory_levels(self, detail):
         if "errors" in detail:
             return None
-        product = detail
+
+        inventories = []
+        inventory_item = []
+
+        # Gets inventory items
 
         if detail["data"].get("productVariant"):
-            inventory_item = detail["data"]["productVariant"]["inventoryItem"]
+            for item in detail["data"]["productVariant"]["inventoryItem"]:
+                inventory_item.append(item)
 
         elif len(detail["data"]["products"]["edges"]) > 0:
-            product = detail["data"]["products"]["edges"][0]["node"]
-            if len(product["variants"]["edges"]) > 0:
-                inventory_item = product["variants"]["edges"][0]["node"][
-                    "inventoryItem"
-                ]
-        if len(inventory_item["inventoryLevels"]["edges"]) > 0:
-            product["inventory_level"] = inventory_item["inventoryLevels"]["edges"][0][
-                "node"
-            ]
-        return product
+            for product in detail["data"]["products"]["edges"]:
+                for variant in product["node"]["variants"]["edges"]:
+                    if variant["node"]["inventoryItem"]:
+                        inventory_item.append(variant["node"]["inventoryItem"])
+
+        if len(inventory_item) == 0:
+            return None
+
+        for item in inventory_item:
+            for level in item["inventoryLevels"]["edges"]:
+                inventories.append(
+                    {
+                        "inventory_id": level.get("node", {}).get("id"),
+                        "available": level.get("node", {}).get("available", 0),
+                    }
+                )
+
+        return inventories
 
     def update_product_mutation(
         self, level_id, quantity, update_field="availableDelta"
     ):
 
-        mutation = """ 
+        mutation = """
                 mutation M($input: InventoryAdjustQuantityInput!) {
                 	inventoryAdjustQuantity(input: $input) {
                   	inventoryLevel {
@@ -595,37 +607,41 @@ class shopifyGraphQLV2Sink(RecordSink):
     def update_inventory(self, item):
         operation = "add"
         filter_key = self.get_product_filter_key(item)
-        product = self.query_pducts(f"{filter_key['key']}:{filter_key['val']}")
-        product = self.extract_product(product)
+        products = self.query_products(f"{filter_key['key']}:{filter_key['val']}")
+        inventories = self.get_inventory_levels(products)
         quantity = None
 
-        if "operation" in item:
-            operation = item["operation"]
+        if "operation" not in item:
+            return None
+
+        operation = item["operation"]
+
+        for inventory in inventories:
             if operation == "subtract":
                 quantity = int(f"-{item['quantity']}")
+
             elif operation == "add":
                 quantity = int(item["quantity"])
+
             elif operation == "set":
+                # We need to calculate the delta between the current quantity and the desired quantity
+                # as the mutation only works adding or subtracting from the current quantity
                 quantity = int(item["quantity"])
-                # Get current available quantity
-                available_quantity = product.get("inventory_level", {}).get("available")
-                #Calculate quantity delta
+                available_quantity = inventory["available"]
                 quantity = quantity - available_quantity
             else:
-                # Retain add by default behavior
-                quantity = int(item["quantity"])
+                raise Exception("Unrecognized operation for inventory Update")
 
-            if quantity:
-                if "inventory_level" in product:
-                    self.update_product_mutation(
-                        product["inventory_level"]["id"], quantity
-                    )
-            else:
-                self.logger.warn(
-                    f"No quantity set for {product.get('title')}. Skipping..."
-                )
+            if quantity == None:
+                raise Exception("No quantity set for inventory Update")
+
+            self.logger.info("Updating inventory for Inventory ID {}".format(inventory["inventory_id"]))
+            self.update_product_mutation(
+                inventory["inventory_id"], quantity
+            )
 
     def post_message(self, res):
+
         if "errors" in res:
             raise Exception(res["errors"])
         print(json.dumps(res))
