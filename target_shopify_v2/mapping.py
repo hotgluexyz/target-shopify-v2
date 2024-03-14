@@ -48,7 +48,7 @@ class UnifiedMapping:
         countries = self.read_json_file(f"countries.json")
         for key in address_mapping.keys():
             address[address_mapping[key]] = addresses.get(key)
-        if len(address.get("countryCode","")) == 3:
+        if len(address.get("countryCode") or "") == 3:
             address["countryCode"] = countries[address["countryCode"]]
         payload[type] = address
         return payload
