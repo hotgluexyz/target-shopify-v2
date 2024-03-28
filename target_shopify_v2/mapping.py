@@ -44,13 +44,16 @@ class UnifiedMapping:
     def map_shopify_address(
         self, addresses, address_mapping, payload, type="billingAddress"
     ):
-        address = {}
-        countries = self.read_json_file(f"countries.json")
-        for key in address_mapping.keys():
-            address[address_mapping[key]] = addresses.get(key)
-        if len(address.get("countryCode") or "") == 3:
-            address["countryCode"] = countries[address["countryCode"]]
-        payload[type] = address
+        if addresses:
+            address = {}
+            countries = self.read_json_file(f"countries.json")
+            for key in address_mapping.keys():
+                if key in addresses:
+                    address[address_mapping[key]] = addresses[key]
+            if len(address["countryCode"]) == 3:
+                address["countryCode"] = countries[address["countryCode"]]
+            if address:    
+                payload[type] = address
         return payload
 
     def map_custom_fields(self, payload, fields):
