@@ -151,6 +151,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
                                 # TrackingInfo fields
                                 number
                                 company
+                                url
                             }
                         }
                         userErrors {
@@ -176,6 +177,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
                     tracking_info = {
                         "company": record.get("carrier"),
                         "number": record.get("tracking_number"),
+                        "url": record.get("tracking_url"),
                     }
 
             fulfillment_payload = {
