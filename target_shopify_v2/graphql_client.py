@@ -140,56 +140,60 @@ class shopifyGraphQLV2Sink(HotglueSink):
         return order_id
 
     def fulfil_order(self, record, order_id, payload=None):
-        try:
-            mutation = """
-                mutation fulfillmentCreateV2($fulfillment: FulfillmentV2Input!) {
-                fulfillmentCreateV2(fulfillment: $fulfillment) {
-                        fulfillment {
-                            # Fulfillment fields
-                            id
-                            trackingInfo {
-                                # TrackingInfo fields
-                                number
-                                company
-                                url
-                            }
+        mutation = """
+            mutation fulfillmentCreateV2($fulfillment: FulfillmentV2Input!) {
+            fulfillmentCreateV2(fulfillment: $fulfillment) {
+                    fulfillment {
+                        # Fulfillment fields
+                        id
+                        trackingInfo {
+                            # TrackingInfo fields
+                            number
+                            company
+                            url
                         }
-                        userErrors {
-                                field
-                                message
-                        }
+                    }
+                    userErrors {
+                            field
+                            message
                     }
                 }
-        """
-            fulfill_items = []
-            tracking_info = None
-            if "fulfilled" in record:
-                if record["fulfilled"] is True:
-                    order_details = self.query_order(order_id)
-                    if "order" in order_details["data"]:
-                        line_items = order_details["data"]["order"][
-                            "fulfillmentOrders"
-                        ]["edges"]
-                        fulfill_item = {"fulfillmentOrderId": order_id}
-                        for line_item in line_items:
-                            fulfill_item["fulfillmentOrderId"] = line_item["node"]["id"]
-                            fulfill_items.append(fulfill_item)
-                    tracking_info = {
-                        "company": record.get("carrier"),
-                        "number": record.get("tracking_number"),
-                        "url": record.get("tracking_url"),
-                    }
-
-            fulfillment_payload = {
-                "lineItemsByFulfillmentOrder": fulfill_items,
-                "trackingInfo": tracking_info,
             }
-            res_return = self.deploy_mutation(
-                mutation, {"fulfillment": fulfillment_payload}
-            )
-            self.post_message(res_return)
-        except Exception:
-            raise Exception
+    """
+        fulfill_items = []
+        tracking_info = None
+        if "fulfilled" in record:
+            if record["fulfilled"] is True:
+                order_details = self.query_order(order_id)
+                if "order" in order_details["data"]:
+                    # Get the fulfillmentOrders associated to this order
+                    line_items = order_details["data"]["order"][
+                        "fulfillmentOrders"
+                    ]["edges"]
+
+                    if not line_items:
+                        raise Exception(f"There are no fulfillment orders for this order: {order_details['data']['order']}")
+
+                    # TODO: Why do we have to do this on a line item level?
+                    for line_item in line_items:
+                        fulfill_item = {}
+                        fulfill_item["fulfillmentOrderId"] = line_item["node"]["id"]
+                        fulfill_items.append(fulfill_item)
+
+                tracking_info = {
+                    "company": record.get("carrier"),
+                    "number": record.get("tracking_number"),
+                    "url": record.get("tracking_url"),
+                }
+
+        fulfillment_payload = {
+            "lineItemsByFulfillmentOrder": fulfill_items,
+            "trackingInfo": tracking_info,
+        }
+        res_return = self.deploy_mutation(
+            mutation, {"fulfillment": fulfillment_payload}
+        )
+        self.post_message(res_return)
 
     def query_sku(self, sku):
         query = """
@@ -221,6 +225,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
                                     id
                                     name
                                     quantity
+                                    requiresShipping
                                 }
                             }
                         }
@@ -679,7 +684,12 @@ class shopifyGraphQLV2Sink(HotglueSink):
         if "errors" in res:
             self.update_state({"error_response": res["errors"]})
             raise Exception(res["errors"])
-        print(json.dumps(res))
+        
+        data = res.get("data", {})
+        for key in data:
+            if data[key].get("userErrors"):
+                raise Exception(data[key]["userErrors"])
+
 
     def preprocess_record(self, record: dict, context: dict) -> dict:
         for key, value in record.items():
