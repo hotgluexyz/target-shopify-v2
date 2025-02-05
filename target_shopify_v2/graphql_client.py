@@ -2,19 +2,57 @@
 
 
 import json
-from itertools import product
 import re
 
 import requests
 from singer_sdk.sinks import RecordSink
 
 from target_shopify_v2.mapping import UnifiedMapping
+from singer_sdk.plugin_base import PluginBase
+from typing import Dict, List, Optional
 
 
 class shopifyGraphQLV2Sink(RecordSink):
+    def __init__(
+        self,
+        target: PluginBase,
+        stream_name: str,
+        schema: Dict,
+        key_properties: Optional[List[str]],
+    ) -> None:
+        super().__init__(target, stream_name, schema, key_properties)
+        self.shop_id = self.infer_shop_id()
+
+
+    def infer_shop_id(self):
+        query = """
+        {
+            shop {
+                name
+                id
+            }
+        }
+        """
+
+        response = requests.post(
+            url=f"https://{self.config.get('shop')}.myshopify.com/admin/api/2025-01/graphql.json",
+            json={"query": query},
+            headers=self.get_http_headers(),
+        )
+
+        shop_id = None
+        if hasattr(response, 'url'):
+            shop_url = response.url
+            shop_id = shop_url.split('/')[2].split('.')[0]
+        else:
+            self.logger.warning(f"Failed to fetch shop_id via GraphQL. Falling back to provided shop name: {self.config.get('shop')}")
+            shop_id = self.config.get('shop')
+
+        return shop_id
+
     @property
     def base_url(self):
-        return f"https://{self.config.get('shop')}.myshopify.com/admin/api/2021-07/graphql.json"
+        return f"https://{self.shop_id}.myshopify.com/admin/api/2025-01/graphql.json"
 
     def get_http_headers(self):
         headers = {}
@@ -485,7 +523,13 @@ class shopifyGraphQLV2Sink(RecordSink):
                                 edges{
                                     node{
                                         id
-                                        available
+                                        location {
+                                            id
+                                        }
+                                        quantities(names: ["available"]) {
+                                            name
+                                            quantity
+                                        }
                                     }
                                 }
                             }
@@ -518,7 +562,13 @@ class shopifyGraphQLV2Sink(RecordSink):
                                                 edges{
                                                     node{
                                                         id
-                                                        available
+                                                        location {
+                                                            id
+                                                        }
+                                                        quantities(names: ["available"]) {
+                                                            name
+                                                            quantity
+                                                        }
                                                     }
                                                 }
                                             }
@@ -547,60 +597,68 @@ class shopifyGraphQLV2Sink(RecordSink):
             return None
 
         inventories = []
-        inventory_item = []
+        inventory_item = None
 
         # Gets inventory items
-
         if detail["data"].get("productVariant"):
-            for item in detail["data"]["productVariant"]["inventoryItem"]:
-                inventory_item.append(item)
-
+            inventory_item = detail["data"]["productVariant"]["inventoryItem"]
         elif len(detail["data"]["products"]["edges"]) > 0:
             for product in detail["data"]["products"]["edges"]:
                 for variant in product["node"]["variants"]["edges"]:
                     if variant["node"]["inventoryItem"]:
-                        inventory_item.append(variant["node"]["inventoryItem"])
+                        inventory_item = variant["node"]["inventoryItem"]
 
-        if len(inventory_item) == 0:
+        if not inventory_item:
             return None
 
-        for item in inventory_item:
-            for level in item["inventoryLevels"]["edges"]:
-                inventories.append(
-                    {
-                        "inventory_id": level.get("node", {}).get("id"),
-                        "available": level.get("node", {}).get("available", 0),
-                    }
-                )
+        for level in inventory_item["inventoryLevels"]["edges"]:
+            inventories.append(
+                {
+                    "inventory_id": inventory_item["id"],
+                    "available": level["node"]["quantities"][0].get("quantity", 0),
+                    "location_id": level["node"]["location"]["id"]
+                }
+            )
 
         return inventories
 
     def update_product_mutation(
-        self, level_id, quantity, update_field="availableDelta"
+        self, location_id, inventory_item_id, quantity, update_field="delta"
     ):
 
         mutation = """
-                mutation M($input: InventoryAdjustQuantityInput!) {
-                	inventoryAdjustQuantity(input: $input) {
-                  	inventoryLevel {
-                    	id
-                    	available
-                    	incoming
-                    	item {
-                      	id
-                      	sku
-                    	}
-                    	location {
-                      	id
-                      	name
-                    	}
-                  	}
-                	}
-              	}
+            mutation inventoryAdjustQuantities($input: InventoryAdjustQuantitiesInput!) {
+              inventoryAdjustQuantities(input: $input) {
+                userErrors {
+                  field
+                  message
+                }
+                inventoryAdjustmentGroup {
+                  createdAt
+                  reason
+                  changes {
+                    name
+                    delta
+                  }
+                }
+              }
+            }
         """
         res = self.deploy_mutation(
             mutation,
-            {"input": {"inventoryLevelId": level_id, update_field: quantity}},
+            {
+                "input": {
+                    "name": "available",
+                    "reason": "correction",
+                    "changes": [
+                        {
+                            "locationId": location_id,
+                            "inventoryItemId": inventory_item_id,
+                            update_field: quantity,
+                        }
+                    ]
+                }
+            }
         )
         self.post_message(res)
 
@@ -637,11 +695,10 @@ class shopifyGraphQLV2Sink(RecordSink):
 
             self.logger.info("Updating inventory for Inventory ID {}".format(inventory["inventory_id"]))
             self.update_product_mutation(
-                inventory["inventory_id"], quantity
+                inventory["location_id"], inventory["inventory_id"], quantity
             )
 
     def post_message(self, res):
-
         if "errors" in res:
             raise Exception(res["errors"])
         print(json.dumps(res))
