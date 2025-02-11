@@ -72,12 +72,22 @@ class shopifyGraphQLV2Sink(RecordSink):
         return res.json()
 
     def shopify_query(self, query, variables, input_name="input"):
+        payload = {"query": query}
+
+        if variables:
+            payload["variables"] = variables
+
         res = requests.post(
             url=self.base_url,
-            json={"query": query, "variables": variables},
+            json=payload,
             headers=self.get_http_headers(),
         )
-        return res.json()
+
+        data = res.json()
+
+        self.post_message(data)
+
+        return data
 
     def upload_order(self, record):
         mapping = UnifiedMapping()
@@ -108,9 +118,17 @@ class shopifyGraphQLV2Sink(RecordSink):
                                             record["customer_id"] = customer["id"]
                                             if customer["email"]:
                                                 record["email"] = customer["email"]
+
+                shop_info = self.query_shop()["data"]["shop"]
+
+                # Injecting the "shop_info" into "record"
+                if isinstance(record, dict):
+                    record["_shop_info"] = shop_info
+
                 payload = mapping.prepare_payload(
                     record, "sale_orders", target="shopify"
                 )
+
                 payload = self.order_lookups(payload)
                 mutation = """
                         mutation draftOrderCreate($input: DraftOrderInput!) {
@@ -203,6 +221,16 @@ class shopifyGraphQLV2Sink(RecordSink):
             self.post_message(res_return)
         except Exception:
             raise Exception
+
+    def query_shop(self):
+        query = """
+            query ShopInfo {
+                shop {
+                    currencyCode
+                }
+            }
+        """.strip()
+        return self.shopify_query(query, None)
 
     def query_sku(self, sku):
         query = """
@@ -701,4 +729,4 @@ class shopifyGraphQLV2Sink(RecordSink):
     def post_message(self, res):
         if "errors" in res:
             raise Exception(res["errors"])
-        print(json.dumps(res))
+        self.logger.debug(json.dumps(res))
