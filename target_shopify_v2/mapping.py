@@ -144,6 +144,18 @@ class UnifiedMapping:
             payload["appliedDiscount"]["amount"] = record["total_discount"]
             payload["appliedDiscount"]["value"] = record["total_discount"]
             payload["appliedDiscount"]["valueType"] = "FIXED_AMOUNT"
+        if record.get("total_shipping") and float(record["total_shipping"]) > 0:
+            payload["shippingLine"] = {}
+            payload["shippingLine"]["title"] = "Shipping"
+            payload["shippingLine"]["priceWithCurrency"] = {
+                "amount": record["total_shipping"],
+                "currencyCode": record.get(
+                    "currency",
+                    record.get("_shop_info", dict()).get("currencyCode")
+                )
+            }
+            if not payload["shippingLine"]["priceWithCurrency"].get("currencyCode"):
+                raise Exception("Unable to set shipping currency")
         return payload
 
     def prepare_payload(self, record, endpoint="contact", target="shopify"):
