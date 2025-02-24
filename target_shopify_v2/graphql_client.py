@@ -35,7 +35,7 @@ class shopifyGraphQLV2Sink(RecordSink):
         """
 
         response = requests.post(
-            url=f"https://{self.config.get('shop')}.myshopify.com/admin/api/2025-01/graphql.json",
+            url=f"https://{self.config.get('shop')}.myshopify.com/admin/api/2024-04/graphql.json",
             json={"query": query},
             headers=self.get_http_headers(),
         )
@@ -52,7 +52,7 @@ class shopifyGraphQLV2Sink(RecordSink):
 
     @property
     def base_url(self):
-        return f"https://{self.shop_id}.myshopify.com/admin/api/2025-01/graphql.json"
+        return f"https://{self.shop_id}.myshopify.com/admin/api/2024-04/graphql.json"
 
     def get_http_headers(self):
         headers = {}
