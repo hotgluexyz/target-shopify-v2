@@ -752,4 +752,3 @@ class shopifyGraphQLV2Sink(RecordSink):
     def post_message(self, res):
         if "errors" in res:
             raise Exception(res["errors"])
-        print(json.dumps(res))
