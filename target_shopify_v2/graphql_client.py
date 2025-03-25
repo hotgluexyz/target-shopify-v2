@@ -725,6 +725,9 @@ class shopifyGraphQLV2Sink(RecordSink):
             )
 
     def process_variants(self, variants: List[Dict], product_id: str) -> tuple[List[Dict], List[Dict]]:
+        """
+        Process variants and return a tuple of variants to update and variants to create.
+        """
         variants_update = []
         variants_create = []
 
@@ -736,8 +739,10 @@ class shopifyGraphQLV2Sink(RecordSink):
                     "sku": sku,
                 }
             if "id" in variant:
+                # Variant already exists, update it
                 variants_update.append(variant)
             elif "price" not in variant and "options" not in variant:
+                # Variant input does not have an id, and does not contain additional fields, so we assume we need to update the default variant
                 default_variant_res = self.query_default_variant(product_id)
                 self.post_message(default_variant_res)
                 default_variant = default_variant_res.get("data", {}).get("product", {}).get("variants", {}).get("edges", [])[0]
