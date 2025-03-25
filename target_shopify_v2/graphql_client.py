@@ -35,7 +35,7 @@ class shopifyGraphQLV2Sink(RecordSink):
         """
 
         response = requests.post(
-            url=f"https://{self.config.get('shop')}.myshopify.com/admin/api/2024-04/graphql.json",
+            url=f"https://{self.config.get('shop')}.myshopify.com/admin/api/2024-07/graphql.json",
             json={"query": query},
             headers=self.get_http_headers(),
         )
@@ -52,7 +52,7 @@ class shopifyGraphQLV2Sink(RecordSink):
 
     @property
     def base_url(self):
-        return f"https://{self.shop_id}.myshopify.com/admin/api/2024-04/graphql.json"
+        return f"https://{self.shop_id}.myshopify.com/admin/api/2024-07/graphql.json"
 
     def get_http_headers(self):
         headers = {}
@@ -204,6 +204,22 @@ class shopifyGraphQLV2Sink(RecordSink):
         except Exception:
             raise Exception
 
+    def query_default_variant(self, product_id):
+        query = """
+        query GetDefaultVariant($id:ID!) {
+          product(id: $id) {
+            variants(first: 1) {
+              edges {
+                node {
+                  id
+                }
+              }
+            }
+          }
+        }
+        """
+        return self.shopify_query(query, {"id": product_id})
+
     def query_sku(self, sku):
         query = """
             query tapShopify($first: Int, $query: String) {
@@ -345,22 +361,14 @@ class shopifyGraphQLV2Sink(RecordSink):
 
         payload = mapping.prepare_payload(record, "products", target="shopify")
 
+        if payload.get("variants"):
+            variants = payload.pop("variants")
+
         # fix the id if missing prefix
         if payload.get("id"):
 
             if "gid://shopify/Product/" not in payload["id"]:
                 payload["id"] = "gid://shopify/Product/" + str(payload["id"])
-
-            variants_update = []
-            variants_create = []
-            if payload.get("variants"):
-                variants = payload.pop("variants")
-                for variant in variants:
-                    variant.pop("title")
-                    if "id" in variant:
-                        variants_update.append(variant)
-                    else:
-                        variants_create.append(variant)
 
             mutation = """
                 mutation productUpdate($input: ProductInput!) {
@@ -373,41 +381,13 @@ class shopifyGraphQLV2Sink(RecordSink):
             res = self.deploy_mutation(mutation, {"input": payload})
             self.post_message(res)
 
+            variants_update, variants_create = self.process_variants(variants, payload["id"])
+
             if variants_update:
-                mutation = """
-                    mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-                    productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-                        product
-                        {
-                            id
-                        }
-                        productVariants {
-                            id
-                        }
-                    }
-                    }"""
-                res = self.deploy_mutation(
-                    mutation, {"productId": payload["id"], "variants": variants_update}
-                )
-                self.post_message(res)
+                self.update_variants(payload["id"], variants_update)
 
             if variants_create:
-                mutation = """
-                    mutation productVariantsBulkCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-                    productVariantsBulkCreate(productId: $productId, variants: $variants) {
-                        product
-                        {
-                            id
-                        }
-                        productVariants {
-                            id
-                        }
-                    }
-                    }"""
-                res = self.deploy_mutation(
-                    mutation, {"productId": payload["id"], "variants": variants_create}
-                )
-                self.post_message(res)
+                self.create_variants(payload["id"], variants_create)
 
         else:
             mutation = """
@@ -420,6 +400,52 @@ class shopifyGraphQLV2Sink(RecordSink):
                     }"""
             res = self.deploy_mutation(mutation, {"input": payload})
             self.post_message(res)
+            product_id = res["data"].get("productCreate", {}).get("product", {}).get("id")
+
+            if product_id:
+                variants_update, variants_create = self.process_variants(variants, product_id)
+
+                if variants_create:
+                    self.create_variants(product_id, variants_create)
+
+                if variants_update:
+                    self.update_variants(product_id, variants_update)
+
+    def update_variants(self, product_id: str, variants: List[Dict]) -> None:
+        mutation = """
+            mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+            productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+                product
+                {
+                    id
+                }
+                productVariants {
+                    id
+                }
+            }
+            }"""
+        res = self.deploy_mutation(
+            mutation, {"productId": product_id, "variants": variants}
+        )
+        self.post_message(res)
+
+    def create_variants(self, product_id: str, variants: List[Dict]) -> None:
+        mutation = """
+            mutation productVariantsBulkCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+            productVariantsBulkCreate(productId: $productId, variants: $variants) {
+                product
+                {
+                    id
+                }
+                productVariants {
+                    id
+                }
+            }
+            }"""
+        res = self.deploy_mutation(
+            mutation, {"productId": product_id, "variants": variants}
+        )
+        self.post_message(res)
 
     def order_lookups(self, payload):
         lineitems = payload["lineItems"]
@@ -698,7 +724,36 @@ class shopifyGraphQLV2Sink(RecordSink):
                 inventory["location_id"], inventory["inventory_id"], quantity
             )
 
+    def process_variants(self, variants: List[Dict], product_id: str) -> tuple[List[Dict], List[Dict]]:
+        """
+        Process variants and return a tuple of variants to update and variants to create.
+        """
+        variants_update = []
+        variants_create = []
+
+        for variant in variants:
+            variant.pop("title")
+            sku = variant.pop("sku")
+            if sku:
+                variant["inventoryItem"] = {
+                    "sku": sku,
+                }
+            if "id" in variant:
+                # Variant already exists, update it
+                variants_update.append(variant)
+            elif "price" not in variant and "options" not in variant:
+                # Variant input does not have an id, and does not contain additional fields, so we assume we need to update the default variant
+                default_variant_res = self.query_default_variant(product_id)
+                self.post_message(default_variant_res)
+                default_variant = default_variant_res.get("data", {}).get("product", {}).get("variants", {}).get("edges", [])[0]
+                if default_variant:
+                    variant["id"] = default_variant["node"]["id"]
+                    variants_update.append(variant)
+            else:
+                variants_create.append(variant)
+
+        return variants_update, variants_create
+
     def post_message(self, res):
         if "errors" in res:
             raise Exception(res["errors"])
-        print(json.dumps(res))
