@@ -629,7 +629,7 @@ class shopifyGraphQLV2Sink(RecordSink):
             # Gets inventory items
             if detail["data"].get("productVariant"):
                 inventory_item = detail["data"]["productVariant"]["inventoryItem"]
-            elif detail["data"].get("products") and len(detail["data"]["products"]["edges"]) > 0:
+            elif len(detail["data"]["products"]["edges"]) > 0:
                 for product in detail["data"]["products"]["edges"]:
                     for variant in product["node"]["variants"]["edges"]:
                         if variant["node"]["inventoryItem"]:
@@ -704,9 +704,6 @@ class shopifyGraphQLV2Sink(RecordSink):
 
         if "operation" not in item:
             return None
-
-        if inventories is None:
-            raise Exception(f"Product lookup failed: Could not find product with {filter_key['key']}:{filter_key['val']}")
 
         operation = item["operation"]
 
