@@ -703,8 +703,7 @@ class shopifyGraphQLV2Sink(RecordSink):
         inventories = self.get_inventory_levels(products)
 
         if inventories is None:
-            self.logger.error(f"Lookup failed: No inventory found for {query}")
-            return None
+            raise Exception(f"Inventory lookup failed: No inventory found for query '{query}'")
 
         if "operation" not in item:
             return None
