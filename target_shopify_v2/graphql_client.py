@@ -622,31 +622,38 @@ class shopifyGraphQLV2Sink(RecordSink):
         if "errors" in detail:
             return None
 
-        inventories = []
-        inventory_item = None
+        try:
+            inventories = []
+            inventory_item = None
 
-        # Gets inventory items
-        if detail["data"].get("productVariant"):
-            inventory_item = detail["data"]["productVariant"]["inventoryItem"]
-        elif len(detail["data"]["products"]["edges"]) > 0:
-            for product in detail["data"]["products"]["edges"]:
-                for variant in product["node"]["variants"]["edges"]:
-                    if variant["node"]["inventoryItem"]:
-                        inventory_item = variant["node"]["inventoryItem"]
+            # Gets inventory items
+            if detail["data"].get("productVariant"):
+                inventory_item = detail["data"]["productVariant"]["inventoryItem"]
+            elif len(detail["data"]["products"]["edges"]) > 0:
+                for product in detail["data"]["products"]["edges"]:
+                    for variant in product["node"]["variants"]["edges"]:
+                        if variant["node"]["inventoryItem"]:
+                            inventory_item = variant["node"]["inventoryItem"]
 
-        if not inventory_item:
+            if not inventory_item:
+                return None
+
+            for level in inventory_item["inventoryLevels"]["edges"]:
+                inventories.append(
+                    {
+                        "inventory_id": inventory_item["id"],
+                        "available": level["node"]["quantities"][0].get("quantity", 0),
+                        "location_id": level["node"]["location"]["id"]
+                    }
+                )
+
+            return inventories
+        except KeyError as e:
+            self.logger.warning(f"Missing expected field in response - {str(e)}")
             return None
-
-        for level in inventory_item["inventoryLevels"]["edges"]:
-            inventories.append(
-                {
-                    "inventory_id": inventory_item["id"],
-                    "available": level["node"]["quantities"][0].get("quantity", 0),
-                    "location_id": level["node"]["location"]["id"]
-                }
-            )
-
-        return inventories
+        except Exception as e:
+            self.logger.warning(f"Unexpected response structure - {str(e)}")
+            return None
 
     def update_product_mutation(
         self, location_id, inventory_item_id, quantity, update_field="delta"
@@ -691,9 +698,12 @@ class shopifyGraphQLV2Sink(RecordSink):
     def update_inventory(self, item):
         operation = "add"
         filter_key = self.get_product_filter_key(item)
-        products = self.query_products(f"{filter_key['key']}:{filter_key['val']}")
+        query = f"{filter_key['key']}:{filter_key['val']}"
+        products = self.query_products(query)
         inventories = self.get_inventory_levels(products)
-        quantity = None
+
+        if inventories is None:
+            raise Exception(f"Inventory lookup failed: No inventory found for query '{query}'")
 
         if "operation" not in item:
             return None
