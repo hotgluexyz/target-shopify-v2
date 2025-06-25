@@ -649,10 +649,10 @@ class shopifyGraphQLV2Sink(RecordSink):
 
             return inventories
         except KeyError as e:
-            self.logger.error(f"Lookup failed: Missing expected field in response - {str(e)}")
+            self.logger.warning(f"Missing expected field in response - {str(e)}")
             return None
-        except (IndexError, TypeError) as e:
-            self.logger.error(f"Lookup failed: Unexpected response structure - {str(e)}")
+        except Exception as e:
+            self.logger.warning(f"Unexpected response structure - {str(e)}")
             return None
 
     def update_product_mutation(
@@ -698,9 +698,13 @@ class shopifyGraphQLV2Sink(RecordSink):
     def update_inventory(self, item):
         operation = "add"
         filter_key = self.get_product_filter_key(item)
-        products = self.query_products(f"{filter_key['key']}:{filter_key['val']}")
+        query = f"{filter_key['key']}:{filter_key['val']}"
+        products = self.query_products(query)
         inventories = self.get_inventory_levels(products)
-        quantity = None
+
+        if inventories is None:
+            self.logger.error(f"Lookup failed: No inventory found for {query}")
+            return None
 
         if "operation" not in item:
             return None
