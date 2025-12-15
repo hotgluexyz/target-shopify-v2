@@ -5,6 +5,7 @@ from singer_sdk.target_base import Target
 from target_hotglue.target import TargetHotglue
 from target_shopify_v2.sinks import (
     SalesOrdersSink,
+    FulfillmentsSink,
     UpdateInventorySink,
     ProductsSink
 )
@@ -17,7 +18,7 @@ class TargetTargetShopifyV2(TargetHotglue):
     config_jsonschema = th.PropertiesList(
         th.Property("shop", th.StringType, required=True)
     ).to_dict()
-    SINK_TYPES = [SalesOrdersSink, UpdateInventorySink, ProductsSink]
+    SINK_TYPES = [SalesOrdersSink, FulfillmentsSink, UpdateInventorySink, ProductsSink]
 
 
 if __name__ == "__main__":

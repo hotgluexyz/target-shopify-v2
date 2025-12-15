@@ -14,6 +14,18 @@ class SalesOrdersSink(shopifyGraphQLV2Sink):
             self.logger.info(f"Returning {order_id}, True, {state_updates}")
             return order_id, True, state_updates
 
+class FulfillmentsSink(shopifyGraphQLV2Sink):
+    name = "Fulfillments"
+
+    def upsert_record(self, record: dict, context: dict) -> None:
+        """Process the record."""
+        state_updates = dict()
+        if record:
+            record["fulfilled"] = True
+            fulfillment_id = self.fulfil_order(record, record.get("order_id"))
+            self.logger.info(f"Returning {fulfillment_id}, True, {state_updates}")
+            return fulfillment_id, True, state_updates
+
 class ProductsSink(shopifyGraphQLV2Sink):
     name = "Products"
 

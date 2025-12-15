@@ -164,6 +164,8 @@ class shopifyGraphQLV2Sink(HotglueSink):
         tracking_info = None
         if "fulfilled" in record:
             if record["fulfilled"] is True:
+                if not order_id.startswith("gid://shopify/Order/"):
+                    order_id = "gid://shopify/Order/" + order_id
                 order_details = self.query_order(order_id)
                 if "order" in order_details["data"]:
                     # Get the fulfillmentOrders associated to this order
@@ -194,6 +196,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
             mutation, {"fulfillment": fulfillment_payload}
         )
         self.post_message(res_return)
+        return res_return.get('data', {}).get('fulfillmentCreateV2', {}).get('fulfillment', {}).get('id')
 
     def query_sku(self, sku):
         query = """
