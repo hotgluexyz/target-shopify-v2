@@ -14,9 +14,20 @@ pipx install target-shopify-v2
 
 ## Configuration
 
-### Accepted Config Options
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `shop` | string | Yes | Shopify store subdomain (e.g. `your-store` for `your-store.myshopify.com`) |
+| `access_token` | string | No* | OAuth access token for the Admin API (`X-Shopify-Access-Token`). Preferred over `api_key`. |
+| `api_key` | string | No* | Admin API key (private app token). Used when `access_token` is not set. *At least one of `access_token` or `api_key` is required.* |
 
-- [ ] `Developer TODO:` Provide a list of config options accepted by the target.
+**Minimal `config.json`:**
+
+```json
+{
+  "shop": "your-store-name",
+  "access_token": "shpat_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+}
+```
 
 A full list of supported settings and capabilities for this
 target is available by running:
