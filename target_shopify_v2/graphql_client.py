@@ -692,6 +692,8 @@ class shopifyGraphQLV2Sink(HotglueSink):
 
         location_id = item.get("location_id")
         if location_id:
+            if not str(location_id).startswith("gid://shopify/Location/"):
+                location_id = "gid://shopify/Location/" + str(location_id)
             matched = [inv for inv in inventories if inv["location_id"] == location_id]
             if not matched:
                 raise Exception(f"No inventory found for location_id '{location_id}'")
