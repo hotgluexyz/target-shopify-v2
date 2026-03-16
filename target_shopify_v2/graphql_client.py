@@ -673,6 +673,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
                 }
             },
         )
+        self.post_message(res)
         return res
 
     def update_inventory(self, item):
