@@ -123,6 +123,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
             if first_order_node:
                 order_id = first_order_node["id"]
                 self.fulfil_order(record, order_id)
+                return order_id
             else:
                 # Handle the case where the order node is not found
                 self.logger.warn(f"Unable find Order Number: {record['order_number']} for {self.stream_name}")
@@ -132,7 +133,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
 
     def update_order_by_id(self, record):
         order = self.query_order(record.get("id"))
-        order_id = order["data"]["order"]["id"],
+        order_id = order["data"]["order"]["id"]
         self.fulfil_order(
             record,
             order_id,
@@ -523,11 +524,17 @@ class shopifyGraphQLV2Sink(HotglueSink):
                         inventoryItem{
                             id
                             sku
-                            inventoryLevels(first:1){
+                            inventoryLevels(first:25){
                                 edges{
                                     node{
                                         id
-                                        available
+                                        quantities(names: ["available"]) {
+                                            name
+                                            quantity
+                                        }
+                                        location {
+                                            id
+                                        }
                                     }
                                 }
                             }
@@ -556,11 +563,17 @@ class shopifyGraphQLV2Sink(HotglueSink):
                                         inventoryItem{
                                             id
                                             sku
-                                            inventoryLevels(first:1){
+                                            inventoryLevels(first:25){
                                                 edges{
                                                     node{
                                                         id
-                                                        available
+                                                        quantities(names: ["available"]) {
+                                                            name
+                                                            quantity
+                                                        }
+                                                        location {
+                                                            id
+                                                        }
                                                     }
                                                 }
                                             }
@@ -592,10 +605,10 @@ class shopifyGraphQLV2Sink(HotglueSink):
         inventory_item = []
 
         # Gets inventory items
-
         if detail["data"].get("productVariant"):
-            for item in detail["data"]["productVariant"]["inventoryItem"]:
-                inventory_item.append(item)
+            inv = detail["data"]["productVariant"].get("inventoryItem")
+            if inv:
+                inventory_item.append(inv)
 
         elif len(detail["data"]["products"]["edges"]) > 0:
             for product in detail["data"]["products"]["edges"]:
@@ -607,42 +620,58 @@ class shopifyGraphQLV2Sink(HotglueSink):
             return None
 
         for item in inventory_item:
+            inventory_item_id = item.get("id")
             for level in item["inventoryLevels"]["edges"]:
+                node = level.get("node", {})
+                quantities = node.get("quantities", [])
+                available = quantities[0].get("quantity", 0) if quantities else 0
                 inventories.append(
                     {
-                        "inventory_id": level.get("node", {}).get("id"),
-                        "available": level.get("node", {}).get("available", 0),
+                        "inventory_id": node.get("id"),
+                        "inventory_item_id": inventory_item_id,
+                        "available": available,
+                        "location_id": node.get("location", {}).get("id"),
                     }
                 )
 
         return inventories
 
     def update_product_mutation(
-        self, level_id, quantity, update_field="availableDelta"
+        self, location_id, inventory_item_id, quantity, update_field="delta"
     ):
-
         mutation = """
-                mutation M($input: InventoryAdjustQuantityInput!) {
-                	inventoryAdjustQuantity(input: $input) {
-                  	inventoryLevel {
-                    	id
-                    	available
-                    	incoming
-                    	item {
-                      	id
-                      	sku
-                    	}
-                    	location {
-                      	id
-                      	name
-                    	}
-                  	}
-                	}
-              	}
+            mutation inventoryAdjustQuantities($input: InventoryAdjustQuantitiesInput!) {
+              inventoryAdjustQuantities(input: $input) {
+                userErrors {
+                  field
+                  message
+                }
+                inventoryAdjustmentGroup {
+                  createdAt
+                  reason
+                  changes {
+                    name
+                    delta
+                  }
+                }
+              }
+            }
         """
         res = self.deploy_mutation(
             mutation,
-            {"input": {"inventoryLevelId": level_id, update_field: quantity}},
+            {
+                "input": {
+                    "name": "available",
+                    "reason": "correction",
+                    "changes": [
+                        {
+                            "locationId": location_id,
+                            "inventoryItemId": inventory_item_id,
+                            update_field: quantity,
+                        }
+                    ],
+                }
+            },
         )
         return res
 
@@ -653,11 +682,22 @@ class shopifyGraphQLV2Sink(HotglueSink):
         inventories = self.get_inventory_levels(products)
         quantity = None
 
+        if not inventories:
+            raise Exception(f"Inventory lookup failed: no inventory levels found for query '{filter_key['key']}:{filter_key['val']}'")
+
         if "operation" not in item:
             return None
 
         operation = item["operation"]
 
+        location_id = item.get("location_id")
+        if location_id:
+            matched = [inv for inv in inventories if inv["location_id"] == location_id]
+            if not matched:
+                raise Exception(f"No inventory found for location_id '{location_id}'")
+            inventories = matched
+
+        results = []
         for inventory in inventories:
             if operation == "subtract":
                 quantity = int(f"-{item['quantity']}")
@@ -678,9 +718,11 @@ class shopifyGraphQLV2Sink(HotglueSink):
                 raise Exception("No quantity set for inventory Update")
 
             self.logger.info("Updating inventory for Inventory ID {}".format(inventory["inventory_id"]))
-            self.update_product_mutation(
-                inventory["inventory_id"], quantity
+            res = self.update_product_mutation(
+                inventory["location_id"], inventory["inventory_item_id"], quantity
             )
+            results.append(res)
+        return results
 
     def post_message(self, res):
 
