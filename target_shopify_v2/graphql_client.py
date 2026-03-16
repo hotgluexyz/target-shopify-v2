@@ -697,7 +697,6 @@ class shopifyGraphQLV2Sink(HotglueSink):
                 raise Exception(f"No inventory found for location_id '{location_id}'")
             inventories = matched
 
-        results = []
         for inventory in inventories:
             if operation == "subtract":
                 quantity = int(f"-{item['quantity']}")
@@ -718,11 +717,10 @@ class shopifyGraphQLV2Sink(HotglueSink):
                 raise Exception("No quantity set for inventory Update")
 
             self.logger.info("Updating inventory for Inventory ID {}".format(inventory["inventory_id"]))
-            res = self.update_product_mutation(
+            self.update_product_mutation(
                 inventory["location_id"], inventory["inventory_item_id"], quantity
             )
-            results.append(res)
-        return results
+        return inventories[0]["inventory_item_id"]
 
     def post_message(self, res):
 
