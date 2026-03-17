@@ -17,7 +17,10 @@ from singer_sdk.exceptions import FatalAPIError, RetriableAPIError
 class shopifyGraphQLV2Sink(HotglueSink):
     @property
     def base_url(self):
-        return f"https://{self.config.get('shop')}.myshopify.com/admin/api/2021-07/graphql.json"
+        base = self.config.get('shop')
+        if not base.endswith('.myshopify.com'):
+            base = f"{base}.myshopify.com"
+        return f"https://{base}/admin/api/2021-07/graphql.json"
 
     def get_http_headers(self):
         headers = {}
