@@ -417,7 +417,11 @@ class shopifyGraphQLV2Sink(HotglueSink):
                     }"""
                 res = self.deploy_mutation(mutation, {"productId": payload["id"], "variants": variants_create})
         else:
-            payload.pop("variants", None)
+            variants_create = []
+            for variant in payload.pop("variants", []):
+                variant.pop("title", None)
+                variants_create.append(variant)
+
             mutation = """
                     mutation productCreate($input: ProductInput!) {
                     productCreate(input: $input) {
@@ -427,6 +431,20 @@ class shopifyGraphQLV2Sink(HotglueSink):
                     }
                     }"""
             res = self.deploy_mutation(mutation, {"input": payload})
+            if variants_create:
+                product_id = res["data"]["productCreate"]["product"]["id"]
+                mutation = """
+                    mutation productVariantsBulkCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+                    productVariantsBulkCreate(productId: $productId, variants: $variants) {
+                        product {
+                            id
+                        }
+                        productVariants {
+                            id
+                        }
+                    }
+                    }"""
+                res = self.deploy_mutation(mutation, {"productId": product_id, "variants": variants_create})
         return res
 
     def order_lookups(self, payload):

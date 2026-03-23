@@ -84,10 +84,9 @@ class UnifiedMapping:
             if variant.get("sku"):
                 variant_dictionary.setdefault("inventoryItem", {})["sku"] = variant["sku"]
             if variant.get("cost"):
-                variant_dictionary["inventoryItem"] = {
-                    "cost": variant["cost"],
-                    "tracked": True,
-                }
+                inv = variant_dictionary.setdefault("inventoryItem", {})
+                inv["cost"] = variant["cost"]
+                inv["tracked"] = True
             if variant.get("id"):
                 if "gid://shopify/ProductVariant/" not in variant["id"]:
                     variant_dictionary["id"] = "gid://shopify/ProductVariant/" + str(
