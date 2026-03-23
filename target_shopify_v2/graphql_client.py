@@ -371,14 +371,13 @@ class shopifyGraphQLV2Sink(HotglueSink):
 
             variants_update = []
             variants_create = []
-            if payload.get("variants"):
-                variants = payload.pop("variants")
-                for variant in variants:
-                    variant.pop("title")
-                    if "id" in variant:
-                        variants_update.append(variant)
-                    else:
-                        variants_create.append(variant)
+            variants = payload.pop("variants", [])
+            for variant in variants:
+                variant.pop("title", None)
+                if "id" in variant:
+                    variants_update.append(variant)
+                else:
+                    variants_create.append(variant)
 
             mutation = """
                 mutation productUpdate($input: ProductInput!) {
@@ -418,6 +417,11 @@ class shopifyGraphQLV2Sink(HotglueSink):
                     }"""
                 res = self.deploy_mutation(mutation, {"productId": payload["id"], "variants": variants_create})
         else:
+            variants_create = []
+            for variant in payload.pop("variants", []):
+                variant.pop("title", None)
+                variants_create.append(variant)
+
             mutation = """
                     mutation productCreate($input: ProductInput!) {
                     productCreate(input: $input) {
@@ -427,6 +431,20 @@ class shopifyGraphQLV2Sink(HotglueSink):
                     }
                     }"""
             res = self.deploy_mutation(mutation, {"input": payload})
+            if variants_create:
+                product_id = res["data"]["productCreate"]["product"]["id"]
+                mutation = """
+                    mutation productVariantsBulkCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+                    productVariantsBulkCreate(productId: $productId, strategy: REMOVE_STANDALONE_VARIANT, variants: $variants) {
+                        product {
+                            id
+                        }
+                        productVariants {
+                            id
+                        }
+                    }
+                    }"""
+                res = self.deploy_mutation(mutation, {"productId": product_id, "variants": variants_create})
         return res
 
     def order_lookups(self, payload):
