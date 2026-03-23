@@ -371,14 +371,13 @@ class shopifyGraphQLV2Sink(HotglueSink):
 
             variants_update = []
             variants_create = []
-            if payload.get("variants"):
-                variants = payload.pop("variants")
-                for variant in variants:
-                    variant.pop("title")
-                    if "id" in variant:
-                        variants_update.append(variant)
-                    else:
-                        variants_create.append(variant)
+            variants = payload.pop("variants", [])
+            for variant in variants:
+                variant.pop("title", None)
+                if "id" in variant:
+                    variants_update.append(variant)
+                else:
+                    variants_create.append(variant)
 
             mutation = """
                 mutation productUpdate($input: ProductInput!) {
@@ -418,6 +417,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
                     }"""
                 res = self.deploy_mutation(mutation, {"productId": payload["id"], "variants": variants_create})
         else:
+            payload.pop("variants", None)
             mutation = """
                     mutation productCreate($input: ProductInput!) {
                     productCreate(input: $input) {

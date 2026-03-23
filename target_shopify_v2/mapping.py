@@ -82,7 +82,7 @@ class UnifiedMapping:
                     id = "gid://shopify/ProductVariant/" + str(variant["id"])
                 variant_dictionary["id"] = variant["id"]
             if variant.get("sku"):
-                variant_dictionary["sku"] = variant.get("sku")
+                variant_dictionary.setdefault("inventoryItem", {})["sku"] = variant["sku"]
             if variant.get("cost"):
                 variant_dictionary["inventoryItem"] = {
                     "cost": variant["cost"],
