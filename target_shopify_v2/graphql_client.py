@@ -435,7 +435,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
                 product_id = res["data"]["productCreate"]["product"]["id"]
                 mutation = """
                     mutation productVariantsBulkCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-                    productVariantsBulkCreate(productId: $productId, variants: $variants) {
+                    productVariantsBulkCreate(productId: $productId, strategy: REMOVE_STANDALONE_VARIANT, variants: $variants) {
                         product {
                             id
                         }
