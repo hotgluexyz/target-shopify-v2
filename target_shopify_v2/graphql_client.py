@@ -785,8 +785,8 @@ class shopifyGraphQLV2Sink(HotglueSink):
             if data[key].get("userErrors"):
                 if parse_messages_in_error:
                     messages = [e.get("message") for e in data[key]["userErrors"] if e.get("message")]
-                    error_message = "; ".join(messages) if messages else ""
-                    raise Exception(error_message)
+                    if messages:
+                        raise Exception("; ".join(messages))
                 raise Exception(data[key]["userErrors"])
 
 
