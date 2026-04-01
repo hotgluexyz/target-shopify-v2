@@ -7,7 +7,8 @@ from target_shopify_v2.sinks import (
     SalesOrdersSink,
     FulfillmentsSink,
     UpdateInventorySink,
-    ProductsSink
+    ProductsSink,
+    ProductsDeleteSink,
 )
 
 
@@ -18,7 +19,7 @@ class TargetTargetShopifyV2(TargetHotglue):
     config_jsonschema = th.PropertiesList(
         th.Property("shop", th.StringType, required=True)
     ).to_dict()
-    SINK_TYPES = [SalesOrdersSink, FulfillmentsSink, UpdateInventorySink, ProductsSink]
+    SINK_TYPES = [SalesOrdersSink, FulfillmentsSink, UpdateInventorySink, ProductsSink, ProductsDeleteSink]
 
 
 if __name__ == "__main__":

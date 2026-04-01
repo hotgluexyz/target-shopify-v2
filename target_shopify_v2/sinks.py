@@ -37,6 +37,16 @@ class ProductsSink(shopifyGraphQLV2Sink):
             self.logger.info(f"Returning {product_id}, True, {state_updates}")
             return product_id, True, state_updates
 
+class ProductsDeleteSink(shopifyGraphQLV2Sink):
+    name = "Products:delete"
+
+    def upsert_record(self, record: dict, context: dict):
+        state_updates = dict()
+        if record:
+            deleted_id = self.delete_product(record)
+            self.logger.info(f"Deleted product {deleted_id}")
+            return deleted_id, True, state_updates
+
 class UpdateInventorySink(shopifyGraphQLV2Sink):
     name = "UpdateInventory"
 
