@@ -746,7 +746,35 @@ class shopifyGraphQLV2Sink(HotglueSink):
             )
         return inventories[0]["inventory_item_id"]
 
-    def post_message(self, res):
+    def delete_product(self, record):
+        product_id = record.get("id")
+
+        if not product_id:
+            raise ValueError("Cannot delete product: no 'id' resolved on record")
+
+        if "gid://shopify/Product/" not in str(product_id):
+            product_id = f"gid://shopify/Product/{product_id}"
+
+        mutation = """
+            mutation productDelete($input: ProductDeleteInput!) {
+              productDelete(input: $input) {
+                deletedProductId
+                userErrors {
+                  message
+                }
+              }
+            }"""
+
+        res = self.deploy_mutation(mutation, {"input": {"id": product_id}})
+        self.post_message(res, parse_messages_in_error=True)
+        deleted_id = (res.get("data") or {}).get("productDelete", {}).get("deletedProductId")
+
+        if not deleted_id:
+            raise Exception(f"productDelete did not return deletedProductId: {res}")
+
+        return deleted_id
+
+    def post_message(self, res, parse_messages_in_error=False):
 
         if "errors" in res:
             self.update_state({"error_response": res["errors"]})
@@ -755,6 +783,10 @@ class shopifyGraphQLV2Sink(HotglueSink):
         data = res.get("data", {})
         for key in data:
             if data[key].get("userErrors"):
+                if parse_messages_in_error:
+                    messages = [e.get("message") for e in data[key]["userErrors"] if e.get("message")]
+                    error_message = "; ".join(messages) if messages else ""
+                    raise Exception(error_message)
                 raise Exception(data[key]["userErrors"])
 
 
