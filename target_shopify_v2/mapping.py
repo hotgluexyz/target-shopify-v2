@@ -108,6 +108,23 @@ class UnifiedMapping:
             if "image_urls" in variant:
                 variant_dictionary["imageSrc"] = variant["image_urls"][0]
                 images.extend([{"src": i} for i in variant["image_urls"]])
+            variant_metafields = []
+            for field in variant.get("custom_fields", []):
+                variant_metafields.append({
+                    "key": field["name"],
+                    "namespace": field.get("namespace", "custom"),
+                    "type": field.get("type", "single_line_text_field"),
+                    "value": str(field["value"]),
+                })
+            for mf in variant.get("metafields", []):
+                variant_metafields.append({
+                    "key": mf["key"],
+                    "namespace": mf.get("namespace", "custom"),
+                    "type": mf.get("type", "single_line_text_field"),
+                    "value": str(mf["value"]),
+                })
+            if variant_metafields:
+                variant_dictionary["metafields"] = variant_metafields
             payload["variants"].append(variant_dictionary)
 
         if "short_description" in record:
@@ -116,16 +133,24 @@ class UnifiedMapping:
         if "options" in record:
             payload["options"] = record["options"]
 
-        if record.get("custom_fields"):
+        if record.get("custom_fields") or record.get("metafields"):
             payload["metafields"] = []
 
         for field in record.get("custom_fields", []):
-            metafields = {}
-            metafields["key"] = field["name"]
-            metafields["namespace"] = "custom"
-            metafields["valueType"] = "STRING"
-            metafields["value"] = field["value"]
-            payload["metafields"].append(metafields)
+            payload["metafields"].append({
+                "key": field["name"],
+                "namespace": field.get("namespace", "custom"),
+                "type": field.get("type", "single_line_text_field"),
+                "value": str(field["value"]),
+            })
+
+        for mf in record.get("metafields", []):
+            payload["metafields"].append({
+                "key": mf["key"],
+                "namespace": mf.get("namespace", "custom"),
+                "type": mf.get("type", "single_line_text_field"),
+                "value": str(mf["value"]),
+            })
         if "active" in record:
             if record["active"] is True:
                 payload["status"] = "ACTIVE"
@@ -147,6 +172,25 @@ class UnifiedMapping:
             payload["appliedDiscount"]["value"] = record["total_discount"]
             payload["appliedDiscount"]["valueType"] = "FIXED_AMOUNT"
         return payload
+
+    def collect_metafields(self, record: dict) -> list:
+        """Collect metafields from a record's custom_fields and metafields lists."""
+        result = []
+        for field in record.get("custom_fields", []):
+            result.append({
+                "key": field["name"],
+                "namespace": field.get("namespace", "custom"),
+                "type": field.get("type", "single_line_text_field"),
+                "value": str(field["value"]),
+            })
+        for mf in record.get("metafields", []):
+            result.append({
+                "key": mf["key"],
+                "namespace": mf.get("namespace", "custom"),
+                "type": mf.get("type", "single_line_text_field"),
+                "value": str(mf["value"]),
+            })
+        return result
 
     def prepare_payload(self, record, endpoint="contact", target="shopify"):
         mapping = self.read_json_file(f"mapping_{target}.json")
