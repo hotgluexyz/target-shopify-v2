@@ -106,7 +106,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
                 order_id = order["data"]["draftOrderComplete"]["draftOrder"]["order"]["id"]
 
                 # DraftOrder metafields are not propagated to the resulting Order by Shopify
-                order_metafields = mapping.collect_metafields(record)
+                order_metafields = [mapping._build_metafield(f) for f in record.get("custom_fields", [])]
                 self._apply_metafields(order_id, order_metafields)
 
                 #2. if record["fulfilled"] == true, mark order as fulfilled
