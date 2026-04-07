@@ -773,7 +773,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
         return deleted_id
 
     def _apply_metafields(self, owner_id: str, metafields: list) -> None:
-        """Set metafields on an owner resource via metafieldsSet (up to 25 at a time)."""
+        """Set metafields on an owner resource via metafieldsSet (sent in batches of 25)."""
         if not metafields:
             return
         mutation = """
@@ -794,8 +794,9 @@ class shopifyGraphQLV2Sink(HotglueSink):
             }
             for mf in metafields
         ]
-        res = self.deploy_mutation(mutation, {"metafields": inputs})
-        self.post_message(res, parse_messages_in_error=True)
+        for i in range(0, len(inputs), 25):
+            res = self.deploy_mutation(mutation, {"metafields": inputs[i:i + 25]})
+            self.post_message(res, parse_messages_in_error=True)
 
     def post_message(self, res, parse_messages_in_error=False):
 
