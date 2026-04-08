@@ -319,11 +319,14 @@ class shopifyGraphQLV2Sink(HotglueSink):
                 self.post_message(res)
 
     def _wait_for_media_ready(self, product_id: str, expected_count: int, max_wait: int = 60):
-        """Poll product media until all items reach a terminal status (READY or FAILED)."""
+        """Poll the newest `expected_count` media items until all reach a terminal status (READY or FAILED).
+
+        Uses `last:` so updates don't match pre-existing media that are already READY.
+        """
         query = """
             query($id: ID!, $count: Int!) {
               product(id: $id) {
-                media(first: $count) {
+                media(last: $count) {
                   edges { node { status } }
                 }
               }
@@ -386,17 +389,18 @@ class shopifyGraphQLV2Sink(HotglueSink):
 
         record["variants"] = record.get("variants") or []
 
-        # Resolve any base64 data URIs in image_urls to temporary S3 pre-signed URLs
         uploaded_keys = []
-        s3_client = get_s3_client(self.config) if has_base64_images(record) else None
-        if s3_client:
-            if record.get("image_urls"):
-                record["image_urls"] = resolve_image_urls(record["image_urls"], s3_client, self.config, uploaded_keys)
-            for variant in record["variants"]:
-                if variant.get("image_urls"):
-                    variant["image_urls"] = resolve_image_urls(variant["image_urls"], s3_client, self.config, uploaded_keys)
+        s3_client = None
 
         try:
+            # Resolve any base64 data URIs in image_urls to temporary S3 pre-signed URLs
+            s3_client = get_s3_client(self.config) if has_base64_images(record) else None
+            if s3_client:
+                if record.get("image_urls"):
+                    record["image_urls"] = resolve_image_urls(record["image_urls"], s3_client, self.config, uploaded_keys)
+                for variant in record["variants"]:
+                    if variant.get("image_urls"):
+                        variant["image_urls"] = resolve_image_urls(variant["image_urls"], s3_client, self.config, uploaded_keys)
             product_id = record.get("id")
             for variant in record["variants"]:
                 sku = variant.get("sku")
