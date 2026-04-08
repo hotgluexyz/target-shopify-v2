@@ -319,26 +319,22 @@ class shopifyGraphQLV2Sink(HotglueSink):
                 self.post_message(res)
 
     def _wait_for_media_ready(self, product_id: str, expected_count: int, max_wait: int = 300):
-        """Poll the newest `expected_count` media items until all reach a terminal status (READY or FAILED).
-
-        Uses `last:` so updates don't match pre-existing media that are already READY.
-        Times out after max_wait seconds; S3 cleanup runs unconditionally after this returns.
-        """
+        """Poll all product media until at least `expected_count` items exist and all are terminal (READY or FAILED)."""
         query = """
-            query($id: ID!, $count: Int!) {
+            query($id: ID!) {
               product(id: $id) {
-                media(last: $count) {
+                media(first: 250) {
                   edges { node { status } }
                 }
               }
             }
         """
+        terminal = {"READY", "FAILED"}
         deadline = time.time() + max_wait
         while time.time() < deadline:
-            res = self.shopify_query(query, {"id": product_id, "count": expected_count})
+            res = self.shopify_query(query, {"id": product_id})
             product = (res.get("data") or {}).get("product") or {}
             nodes = (product.get("media") or {}).get("edges") or []
-            terminal = {"READY", "FAILED"}
             statuses = [n["node"]["status"] for n in nodes]
             if len(statuses) >= expected_count and all(s in terminal for s in statuses):
                 return
@@ -347,6 +343,33 @@ class shopifyGraphQLV2Sink(HotglueSink):
             f"Media processing did not complete within {max_wait}s for {product_id}. "
             "Proceeding with S3 cleanup; Shopify should have fetched the image by now."
         )
+
+    def _delete_product_media(self, product_id: str):
+        """Delete all existing media for a product so new media can replace it."""
+        query = """
+            query($id: ID!) {
+              product(id: $id) {
+                media(first: 250) {
+                  edges { node { id } }
+                }
+              }
+            }
+        """
+        res = self.shopify_query(query, {"id": product_id})
+        product = (res.get("data") or {}).get("product") or {}
+        nodes = (product.get("media") or {}).get("edges") or []
+        media_ids = [n["node"]["id"] for n in nodes]
+        if not media_ids:
+            return
+        mutation = """
+            mutation productDeleteMedia($productId: ID!, $mediaIds: [ID!]!) {
+              productDeleteMedia(productId: $productId, mediaIds: $mediaIds) {
+                deletedMediaIds
+                userErrors { field message }
+              }
+            }
+        """
+        self.deploy_mutation(mutation, {"productId": product_id, "mediaIds": media_ids})
 
     def _split_variants(self, variants):
         """Pop title and partition variants into (to_update, to_create) based on presence of id."""
@@ -452,6 +475,9 @@ class shopifyGraphQLV2Sink(HotglueSink):
 
                 variants_update, variants_create = self._split_variants(payload.pop("variants", []))
 
+                if media:
+                    self._delete_product_media(payload["id"])
+
                 mutation = """
                     mutation productUpdate($input: ProductInput!, $media: [CreateMediaInput!]!) {
                     productUpdate(input: $input, media: $media) {
@@ -473,6 +499,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
                     }
                     }"""
                 res = self.deploy_mutation(mutation, {"input": payload, "media": media})
+                self.post_message(res)
                 product_id = res["data"]["productCreate"]["product"]["id"]
                 if media:
                     self._wait_for_media_ready(product_id, expected_count=len(media))
