@@ -221,7 +221,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
                 }
             }
         """
-        return self.shopify_query(query, {"first": 1, "query": sku})
+        return self.shopify_query(query, {"first": 1, "query": f"sku:{sku}"})
 
     def query_order(self, order_id):
         query = """
@@ -372,37 +372,47 @@ class shopifyGraphQLV2Sink(HotglueSink):
         self.deploy_mutation(mutation, {"productId": product_id, "mediaIds": media_ids})
 
     def _split_variants(self, variants):
-        """Pop title and partition variants into (to_update, to_create) based on presence of id."""
-        to_update, to_create = [], []
-        for v in variants:
-            v.pop("title", None)
-            (to_update if "id" in v else to_create).append(v)
+        """Partition variants into (to_update, to_create) based on presence of id."""
+        to_update = [v for v in variants if "id" in v]
+        to_create = [v for v in variants if "id" not in v]
         return to_update, to_create
 
     def _bulk_update_variants(self, product_id, variants):
         if not variants:
             return None
+        for v in variants:
+            v.pop("title", None)
         mutation = """
             mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
             productVariantsBulkUpdate(productId: $productId, variants: $variants) {
                 product { id }
                 productVariants { id }
+                userErrors { field message }
             }
             }"""
-        return self.deploy_mutation(mutation, {"productId": product_id, "variants": variants})
+        res = self.deploy_mutation(mutation, {"productId": product_id, "variants": variants})
+        self.post_message(res)
+        return res
 
     def _bulk_create_variants(self, product_id, variants, remove_standalone=False):
         if not variants:
             return None
+        for v in variants:
+            title = v.pop("title", None)
+            if title and "optionValues" not in v:
+                v["optionValues"] = [{"optionName": "Title", "name": title}]
         strategy = ", strategy: REMOVE_STANDALONE_VARIANT" if remove_standalone else ""
         mutation = f"""
             mutation productVariantsBulkCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {{
             productVariantsBulkCreate(productId: $productId{strategy}, variants: $variants) {{
                 product {{ id }}
                 productVariants {{ id }}
+                userErrors {{ field message }}
             }}
             }}"""
-        return self.deploy_mutation(mutation, {"productId": product_id, "variants": variants})
+        res = self.deploy_mutation(mutation, {"productId": product_id, "variants": variants})
+        self.post_message(res)
+        return res
 
     def upload_product(self, record):
         mapping = UnifiedMapping()
