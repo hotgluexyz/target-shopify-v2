@@ -93,8 +93,9 @@ class UnifiedMapping:
         payload["variants"] = []
         for variant in record.get("variants"):
             variant_dictionary = {}
-            if variant.get("title", record["name"]):
-                variant_dictionary["title"] = variant.get("title", record["name"])
+            title = variant.get("title") or record.get("name")
+            if title:
+                variant_dictionary["title"] = title
             if variant.get("price"):
                 variant_dictionary["price"] = variant.get("price")
             if variant.get("id"):
