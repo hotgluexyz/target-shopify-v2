@@ -56,6 +56,26 @@ class UnifiedMapping:
                 payload[type] = address
         return payload
 
+    @staticmethod
+    def _build_metafield(field: dict) -> dict:
+        """Convert a custom_fields entry to a Shopify MetafieldInput.
+
+        name supports dot notation: "namespace.key" splits into namespace and key.
+        Without a dot, namespace defaults to "custom".
+        type is always single_line_text_field.
+        """
+        name = field["name"]
+        if "." in name:
+            namespace, key = name.split(".", 1)
+        else:
+            namespace, key = "custom", name
+        return {
+            "namespace": namespace,
+            "key": key,
+            "type": "single_line_text_field",
+            "value": str(field["value"]),
+        }
+
     def map_custom_fields(self, payload, fields):
         # Populate custom fields.
         for key, val in fields:
@@ -108,6 +128,9 @@ class UnifiedMapping:
             if "image_urls" in variant:
                 variant_dictionary["imageSrc"] = variant["image_urls"][0]
                 images.extend([{"src": i} for i in variant["image_urls"]])
+            variant_metafields = [self._build_metafield(f) for f in variant.get("custom_fields", [])]
+            if variant_metafields:
+                variant_dictionary["metafields"] = variant_metafields
             payload["variants"].append(variant_dictionary)
 
         if "short_description" in record:
@@ -116,16 +139,9 @@ class UnifiedMapping:
         if "options" in record:
             payload["options"] = record["options"]
 
-        if record.get("custom_fields"):
-            payload["metafields"] = []
-
-        for field in record.get("custom_fields", []):
-            metafields = {}
-            metafields["key"] = field["name"]
-            metafields["namespace"] = "custom"
-            metafields["valueType"] = "STRING"
-            metafields["value"] = field["value"]
-            payload["metafields"].append(metafields)
+        product_metafields = [self._build_metafield(f) for f in record.get("custom_fields", [])]
+        if product_metafields:
+            payload["metafields"] = product_metafields
         if "active" in record:
             if record["active"] is True:
                 payload["status"] = "ACTIVE"

@@ -104,6 +104,11 @@ class shopifyGraphQLV2Sink(HotglueSink):
                     params = {"id": draft_order["id"]}
                 order = self.complete_draft_order(params)
                 order_id = order["data"]["draftOrderComplete"]["draftOrder"]["order"]["id"]
+
+                # DraftOrder metafields are not propagated to the resulting Order by Shopify
+                order_metafields = [mapping._build_metafield(f) for f in record.get("custom_fields", [])]
+                self._apply_metafields(order_id, order_metafields)
+
                 #2. if record["fulfilled"] == true, mark order as fulfilled
                 if (
                     order
@@ -164,34 +169,27 @@ class shopifyGraphQLV2Sink(HotglueSink):
                 }
             }
     """
+        if not record.get("fulfilled"):
+            return None
+
         fulfill_items = []
-        tracking_info = None
-        if "fulfilled" in record:
-            if record["fulfilled"] is True:
-                if not order_id.startswith("gid://shopify/Order/"):
-                    order_id = "gid://shopify/Order/" + order_id
-                order_details = self.query_order(order_id)
-                if "order" in order_details["data"]:
-                    # Get the fulfillmentOrders associated to this order
-                    line_items = order_details["data"]["order"][
-                        "fulfillmentOrders"
-                    ]["edges"]
+        if not order_id.startswith("gid://shopify/Order/"):
+            order_id = "gid://shopify/Order/" + order_id
+        order_details = self.query_order(order_id)
+        if "order" in order_details["data"]:
+            line_items = order_details["data"]["order"]["fulfillmentOrders"]["edges"]
 
-                    if not line_items:
-                        raise Exception(f"There are no fulfillment orders for this order: {order_details['data']['order']}")
+            if not line_items:
+                raise Exception(f"There are no fulfillment orders for this order: {order_details['data']['order']}")
 
-                    # TODO: Why do we have to do this on a line item level?
-                    for line_item in line_items:
-                        fulfill_item = {}
-                        fulfill_item["fulfillmentOrderId"] = line_item["node"]["id"]
-                        fulfill_items.append(fulfill_item)
+            for line_item in line_items:
+                fulfill_items.append({"fulfillmentOrderId": line_item["node"]["id"]})
 
-                tracking_info = {
-                    "company": record.get("carrier"),
-                    "number": record.get("tracking_number"),
-                    "url": record.get("tracking_url"),
-                }
-
+        tracking_info = {
+            "company": record.get("carrier"),
+            "number": record.get("tracking_number"),
+            "url": record.get("tracking_url"),
+        }
         fulfillment_payload = {
             "lineItemsByFulfillmentOrder": fulfill_items,
             "trackingInfo": tracking_info,
@@ -773,6 +771,32 @@ class shopifyGraphQLV2Sink(HotglueSink):
             raise Exception(f"productDelete did not return deletedProductId: {res}")
 
         return deleted_id
+
+    def _apply_metafields(self, owner_id: str, metafields: list) -> None:
+        """Set metafields on an owner resource via metafieldsSet (sent in batches of 25)."""
+        if not metafields:
+            return
+        mutation = """
+            mutation metafieldsSet($metafields: [MetafieldsSetInput!]!) {
+              metafieldsSet(metafields: $metafields) {
+                metafields { id key namespace ownerType }
+                userErrors { field message }
+              }
+            }
+        """
+        inputs = [
+            {
+                "ownerId": owner_id,
+                "namespace": mf.get("namespace", "custom"),
+                "key": mf["key"],
+                "type": mf.get("type", "single_line_text_field"),
+                "value": str(mf["value"]),
+            }
+            for mf in metafields
+        ]
+        for i in range(0, len(inputs), 25):
+            res = self.deploy_mutation(mutation, {"metafields": inputs[i:i + 25]})
+            self.post_message(res, parse_messages_in_error=True)
 
     def post_message(self, res, parse_messages_in_error=False):
 
