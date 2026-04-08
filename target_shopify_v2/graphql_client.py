@@ -335,10 +335,8 @@ class shopifyGraphQLV2Sink(HotglueSink):
         deadline = time.time() + max_wait
         while time.time() < deadline:
             res = self.shopify_query(query, {"id": product_id, "count": expected_count})
-            nodes = (
-                res.get("data", {}).get("product", {})
-                .get("media", {}).get("edges", [])
-            )
+            product = (res.get("data") or {}).get("product") or {}
+            nodes = (product.get("media") or {}).get("edges") or []
             terminal = {"READY", "FAILED"}
             statuses = [n["node"]["status"] for n in nodes]
             if len(statuses) >= expected_count and all(s in terminal for s in statuses):
