@@ -318,10 +318,11 @@ class shopifyGraphQLV2Sink(HotglueSink):
                 res = self.deploy_mutation(mutation, {"input": {"id": res["id"]}})
                 self.post_message(res)
 
-    def _wait_for_media_ready(self, product_id: str, expected_count: int, max_wait: int = 60):
+    def _wait_for_media_ready(self, product_id: str, expected_count: int, max_wait: int = 300):
         """Poll the newest `expected_count` media items until all reach a terminal status (READY or FAILED).
 
         Uses `last:` so updates don't match pre-existing media that are already READY.
+        Times out after max_wait seconds; S3 cleanup runs unconditionally after this returns.
         """
         query = """
             query($id: ID!, $count: Int!) {
@@ -344,7 +345,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
             time.sleep(3)
         self.logger.warning(
             f"Media processing did not complete within {max_wait}s for {product_id}. "
-            "Proceeding with S3 cleanup; Shopify may still process the image."
+            "Proceeding with S3 cleanup; Shopify should have fetched the image by now."
         )
 
     def _split_variants(self, variants):
