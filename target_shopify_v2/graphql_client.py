@@ -475,7 +475,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
             payload = mapping.prepare_payload(record, "products", target="shopify")
 
             # images is not accepted in ProductInput; pass as top-level media argument instead
-            raw_images = payload.pop("images", [])
+            raw_images = payload.pop("images", None) or []
             media = [{"originalSource": img["src"], "mediaContentType": "IMAGE"} for img in raw_images if img.get("src")]
 
             # fix the id if missing prefix
@@ -495,12 +495,15 @@ class shopifyGraphQLV2Sink(HotglueSink):
                     }
                     }"""
                 res = self.deploy_mutation(mutation, {"input": payload, "media": media})
+                self.post_message(res)
                 if media:
                     self._wait_for_media_ready(payload["id"], expected_count=len(media))
                 res = self._bulk_update_variants(payload["id"], variants_update) or res
                 res = self._bulk_create_variants(payload["id"], variants_create) or res
             else:
-                _, variants_create = self._split_variants(payload.pop("variants", []))
+                variants_create = payload.pop("variants", [])
+                for v in variants_create:
+                    v.pop("id", None)
 
                 mutation = """
                     mutation productCreate($input: ProductInput!, $media: [CreateMediaInput!]!) {
