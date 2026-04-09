@@ -19,13 +19,12 @@ def is_base64_image(value: str) -> bool:
 
 
 def has_base64_images(record: dict) -> bool:
-    """Return True if the product record or any of its variants contain base64 image data."""
-    if any(is_base64_image(u) for u in record.get("image_urls") or []):
+    """Return True if the product record or any of its variants have image_blobs."""
+    if record.get("image_blobs"):
         return True
     return any(
-        is_base64_image(u)
+        variant.get("image_blobs")
         for variant in (record.get("variants") or [])
-        for u in (variant.get("image_urls") or [])
     )
 
 
@@ -88,21 +87,19 @@ def upload_base64_image(s3_client, data_uri: str, config: dict) -> tuple:
     return bucket, key, presigned_url
 
 
-def resolve_image_urls(image_urls: list, s3_client, config: dict, uploaded_keys: list) -> list:
+def resolve_blobs_to_urls(image_blobs: list, s3_client, config: dict, uploaded_keys: list) -> list:
     """
-    Replace base64 data URIs in image_urls with temporary S3 pre-signed URLs.
+    Upload base64 data URIs from image_blobs to S3 and return pre-signed URLs.
 
-    Plain URLs pass through unchanged. Uploaded keys are appended to uploaded_keys
-    so the caller can clean them up after the Shopify mutation completes.
+    Uploaded keys are appended to uploaded_keys so the caller can clean them up
+    after the Shopify mutation completes.
     """
     resolved = []
-    for url in image_urls:
-        if is_base64_image(url):
-            bucket, key, presigned_url = upload_base64_image(s3_client, url, config)
+    for blob in image_blobs:
+        if is_base64_image(blob):
+            bucket, key, presigned_url = upload_base64_image(s3_client, blob, config)
             uploaded_keys.append((bucket, key))
             resolved.append(presigned_url)
-        else:
-            resolved.append(url)
     return resolved
 
 

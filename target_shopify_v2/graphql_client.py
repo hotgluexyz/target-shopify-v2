@@ -12,7 +12,7 @@ from target_shopify_v2.s3_image import (
     cleanup_temp_images,
     get_s3_client,
     has_base64_images,
-    resolve_image_urls,
+    resolve_blobs_to_urls,
 )
 from target_hotglue.client import HotglueSink
 from datetime import datetime
@@ -425,14 +425,16 @@ class shopifyGraphQLV2Sink(HotglueSink):
         s3_client = None
 
         try:
-            # Resolve any base64 data URIs in image_urls to temporary S3 pre-signed URLs
+            # Upload base64 blobs from image_blobs to S3 and merge the resulting pre-signed URLs into image_urls
             s3_client = get_s3_client(self.config) if has_base64_images(record) else None
             if s3_client:
-                if record.get("image_urls"):
-                    record["image_urls"] = resolve_image_urls(record["image_urls"], s3_client, self.config, uploaded_keys)
+                if record.get("image_blobs"):
+                    resolved = resolve_blobs_to_urls(record.pop("image_blobs"), s3_client, self.config, uploaded_keys)
+                    record["image_urls"] = list(record.get("image_urls") or []) + resolved
                 for variant in record["variants"]:
-                    if variant.get("image_urls"):
-                        variant["image_urls"] = resolve_image_urls(variant["image_urls"], s3_client, self.config, uploaded_keys)
+                    if variant.get("image_blobs"):
+                        resolved = resolve_blobs_to_urls(variant.pop("image_blobs"), s3_client, self.config, uploaded_keys)
+                        variant["image_urls"] = list(variant.get("image_urls") or []) + resolved
             product_id = record.get("id")
             for variant in record["variants"]:
                 sku = variant.get("sku")

@@ -127,7 +127,6 @@ class UnifiedMapping:
                         "locationId": location_id,
                     }
             if "image_urls" in variant:
-                variant_dictionary["imageSrc"] = variant["image_urls"][0]
                 images.extend([{"src": i} for i in variant["image_urls"]])
             variant_metafields = [self._build_metafield(f) for f in variant.get("custom_fields", [])]
             if variant_metafields:
