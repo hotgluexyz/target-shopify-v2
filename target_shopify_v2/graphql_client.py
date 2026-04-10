@@ -344,33 +344,6 @@ class shopifyGraphQLV2Sink(HotglueSink):
             "Proceeding with S3 cleanup; Shopify should have fetched the image by now."
         )
 
-    def _delete_product_media(self, product_id: str):
-        """Delete all existing media for a product so new media can replace it."""
-        query = """
-            query($id: ID!) {
-              product(id: $id) {
-                media(first: 250) {
-                  edges { node { id } }
-                }
-              }
-            }
-        """
-        res = self.shopify_query(query, {"id": product_id})
-        product = (res.get("data") or {}).get("product") or {}
-        nodes = (product.get("media") or {}).get("edges") or []
-        media_ids = [n["node"]["id"] for n in nodes]
-        if not media_ids:
-            return
-        mutation = """
-            mutation productDeleteMedia($productId: ID!, $mediaIds: [ID!]!) {
-              productDeleteMedia(productId: $productId, mediaIds: $mediaIds) {
-                deletedMediaIds
-                userErrors { field message }
-              }
-            }
-        """
-        self.deploy_mutation(mutation, {"productId": product_id, "mediaIds": media_ids})
-
     def _split_variants(self, variants):
         """Partition variants into (to_update, to_create) based on presence of id."""
         to_update = [v for v in variants if "id" in v]
@@ -435,6 +408,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
                     if variant.get("image_blobs"):
                         resolved = resolve_blobs_to_urls(variant.pop("image_blobs"), s3_client, self.config, uploaded_keys)
                         variant["image_urls"] = list(variant.get("image_urls") or []) + resolved
+
             product_id = record.get("id")
             for variant in record["variants"]:
                 sku = variant.get("sku")
@@ -486,9 +460,6 @@ class shopifyGraphQLV2Sink(HotglueSink):
                     payload["id"] = "gid://shopify/Product/" + str(payload["id"])
 
                 variants_update, variants_create = self._split_variants(payload.pop("variants", []))
-
-                if media:
-                    self._delete_product_media(payload["id"])
 
                 mutation = """
                     mutation productUpdate($input: ProductInput!, $media: [CreateMediaInput!]!) {
