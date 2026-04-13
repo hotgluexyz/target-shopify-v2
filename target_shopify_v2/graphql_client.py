@@ -1,14 +1,19 @@
 """TargetShopifyV2 target sink class, which handles writing streams."""
 
 
-import json
-from itertools import product
 import re
+import time
 
 import requests
 from singer_sdk.sinks import RecordSink
 
 from target_shopify_v2.mapping import UnifiedMapping
+from target_shopify_v2.s3_image import (
+    cleanup_temp_images,
+    get_s3_client,
+    has_base64_images,
+    resolve_blobs_to_urls,
+)
 from target_hotglue.client import HotglueSink
 from datetime import datetime
 from singer_sdk.exceptions import FatalAPIError, RetriableAPIError
@@ -216,7 +221,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
                 }
             }
         """
-        return self.shopify_query(query, {"first": 1, "query": sku})
+        return self.shopify_query(query, {"first": 1, "query": f"sku:{sku}"})
 
     def query_order(self, order_id):
         query = """
@@ -313,6 +318,75 @@ class shopifyGraphQLV2Sink(HotglueSink):
                 res = self.deploy_mutation(mutation, {"input": {"id": res["id"]}})
                 self.post_message(res)
 
+    def _wait_for_media_ready(self, product_id: str, expected_count: int, max_wait: int = 300):
+        """Poll all product media until at least `expected_count` items exist and all are terminal (READY or FAILED)."""
+        query = """
+            query($id: ID!) {
+              product(id: $id) {
+                media(first: 250) {
+                  edges { node { status } }
+                }
+              }
+            }
+        """
+        terminal = {"READY", "FAILED"}
+        deadline = time.time() + max_wait
+        while time.time() < deadline:
+            res = self.shopify_query(query, {"id": product_id})
+            product = (res.get("data") or {}).get("product") or {}
+            nodes = (product.get("media") or {}).get("edges") or []
+            statuses = [n["node"]["status"] for n in nodes]
+            if len(statuses) >= expected_count and all(s in terminal for s in statuses):
+                return
+            time.sleep(3)
+        self.logger.warning(
+            f"Media processing did not complete within {max_wait}s for {product_id}. "
+            "Proceeding with S3 cleanup; Shopify should have fetched the image by now."
+        )
+
+    def _split_variants(self, variants):
+        """Partition variants into (to_update, to_create) based on presence of id."""
+        to_update = [v for v in variants if "id" in v]
+        to_create = [v for v in variants if "id" not in v]
+        return to_update, to_create
+
+    def _bulk_update_variants(self, product_id, variants):
+        if not variants:
+            return None
+        for v in variants:
+            v.pop("title", None)
+        mutation = """
+            mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
+            productVariantsBulkUpdate(productId: $productId, variants: $variants) {
+                product { id }
+                productVariants { id }
+                userErrors { field message }
+            }
+            }"""
+        res = self.deploy_mutation(mutation, {"productId": product_id, "variants": variants})
+        self.post_message(res)
+        return res
+
+    def _bulk_create_variants(self, product_id, variants, remove_standalone=False):
+        if not variants:
+            return None
+        for v in variants:
+            title = v.pop("title", None)
+            if title and "optionValues" not in v:
+                v["optionValues"] = [{"optionName": "Title", "name": title}]
+        strategy = ", strategy: REMOVE_STANDALONE_VARIANT" if remove_standalone else ""
+        mutation = f"""
+            mutation productVariantsBulkCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {{
+            productVariantsBulkCreate(productId: $productId{strategy}, variants: $variants) {{
+                product {{ id }}
+                productVariants {{ id }}
+                userErrors {{ field message }}
+            }}
+            }}"""
+        res = self.deploy_mutation(mutation, {"productId": product_id, "variants": variants})
+        self.post_message(res)
+        return res
+
     def upload_product(self, record):
         mapping = UnifiedMapping()
         location = None
@@ -320,130 +394,106 @@ class shopifyGraphQLV2Sink(HotglueSink):
 
         record["variants"] = record.get("variants") or []
 
-        product_id = record.get("id")
-        for variant in record["variants"]:
-            sku = variant.get("sku")
-            if sku:
-                ids = self.query_sku(sku)
-                try:
-                    ids = ids["data"]["productVariants"]["edges"]
-                except KeyError:
-                    ids = None
-                if ids:
-                    ids = ids[0]["node"]
-                    variant["id"] = ids["id"]
-                    product_id = ids["product"]["id"]
-        record["id"] = product_id
+        uploaded_keys = []
+        s3_client = None
 
-        if "data" in locations:
-            if len(locations["data"]["locations"]["edges"]) > 0:
-                locations = locations["data"]["locations"]["edges"]
-                valid_locations = [
-                    l["node"] for l in locations if l["node"]["isActive"]
-                ]
-                if len(valid_locations) == 1:
-                    location = valid_locations[0]
+        try:
+            # Upload base64 blobs from image_blobs to S3 and merge the resulting pre-signed URLs into image_urls
+            s3_client = get_s3_client(self.config) if has_base64_images(record) else None
+            if s3_client:
+                if record.get("image_blobs"):
+                    resolved = resolve_blobs_to_urls(record.pop("image_blobs"), s3_client, self.config, uploaded_keys)
+                    record["image_urls"] = list(record.get("image_urls") or []) + resolved
+                for variant in record["variants"]:
+                    if variant.get("image_blobs"):
+                        resolved = resolve_blobs_to_urls(variant.pop("image_blobs"), s3_client, self.config, uploaded_keys)
+                        variant["image_urls"] = list(variant.get("image_urls") or []) + resolved
 
-                elif "location" in record:
-                    if "name" in record["location"]:
-                        location = next(
-                            (
-                                l
-                                for l in valid_locations
-                                if l["name"] == record["location"]["name"]
-                            ),
-                            None,
-                        )
-        if location:
-            record["location"] = dict(id=location["id"], name=location["name"])
-        else:
-            raise NameError("Missing location")
+            product_id = record.get("id")
+            for variant in record["variants"]:
+                sku = variant.get("sku")
+                if sku:
+                    ids = self.query_sku(sku)
+                    try:
+                        ids = ids["data"]["productVariants"]["edges"]
+                    except KeyError:
+                        ids = None
+                    if ids:
+                        ids = ids[0]["node"]
+                        variant["id"] = ids["id"]
+                        product_id = ids["product"]["id"]
+            record["id"] = product_id
 
-        payload = mapping.prepare_payload(record, "products", target="shopify")
+            if "data" in locations:
+                if len(locations["data"]["locations"]["edges"]) > 0:
+                    locations = locations["data"]["locations"]["edges"]
+                    valid_locations = [
+                        l["node"] for l in locations if l["node"]["isActive"]
+                    ]
+                    if len(valid_locations) == 1:
+                        location = valid_locations[0]
 
-        # fix the id if missing prefix
-        if payload.get("id"):
+                    elif "location" in record:
+                        if "name" in record["location"]:
+                            location = next(
+                                (
+                                    l
+                                    for l in valid_locations
+                                    if l["name"] == record["location"]["name"]
+                                ),
+                                None,
+                            )
+            if location:
+                record["location"] = dict(id=location["id"], name=location["name"])
+            else:
+                raise NameError("Missing location")
 
-            if "gid://shopify/Product/" not in payload["id"]:
-                payload["id"] = "gid://shopify/Product/" + str(payload["id"])
+            payload = mapping.prepare_payload(record, "products", target="shopify")
 
-            variants_update = []
-            variants_create = []
-            variants = payload.pop("variants", [])
-            for variant in variants:
-                variant.pop("title", None)
-                if "id" in variant:
-                    variants_update.append(variant)
-                else:
-                    variants_create.append(variant)
+            # images is not accepted in ProductInput; pass as top-level media argument instead
+            raw_images = payload.pop("images", None) or []
+            media = [{"originalSource": img["src"], "mediaContentType": "IMAGE"} for img in raw_images if img.get("src")]
 
-            mutation = """
-                mutation productUpdate($input: ProductInput!) {
-                productUpdate(input: $input) {
-                    product {
-                    id
-                    }
-                }
-                }"""
-            res = self.deploy_mutation(mutation, {"input": payload})
-            if variants_update:
+            # fix the id if missing prefix
+            if payload.get("id"):
+                if "gid://shopify/Product/" not in payload["id"]:
+                    payload["id"] = "gid://shopify/Product/" + str(payload["id"])
+
+                variants_update, variants_create = self._split_variants(payload.pop("variants", []))
+
                 mutation = """
-                    mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-                    productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-                        product
-                        {
-                            id
-                        }
-                        productVariants {
-                            id
-                        }
+                    mutation productUpdate($input: ProductInput!, $media: [CreateMediaInput!]!) {
+                    productUpdate(input: $input, media: $media) {
+                        product { id }
                     }
                     }"""
-                res = self.deploy_mutation(mutation, {"productId": payload["id"], "variants": variants_update})            
-            if variants_create:
-                mutation = """
-                    mutation productVariantsBulkCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-                    productVariantsBulkCreate(productId: $productId, variants: $variants) {
-                        product
-                        {
-                            id
-                        }
-                        productVariants {
-                            id
-                        }
-                    }
-                    }"""
-                res = self.deploy_mutation(mutation, {"productId": payload["id"], "variants": variants_create})
-        else:
-            variants_create = []
-            for variant in payload.pop("variants", []):
-                variant.pop("title", None)
-                variants_create.append(variant)
+                res = self.deploy_mutation(mutation, {"input": payload, "media": media})
+                self.post_message(res)
+                if media:
+                    self._wait_for_media_ready(payload["id"], expected_count=len(media))
+                res = self._bulk_update_variants(payload["id"], variants_update) or res
+                res = self._bulk_create_variants(payload["id"], variants_create) or res
+            else:
+                variants_create = payload.pop("variants", [])
+                for v in variants_create:
+                    v.pop("id", None)
 
-            mutation = """
-                    mutation productCreate($input: ProductInput!) {
-                    productCreate(input: $input) {
-                        product {
-                        id
-                        }
+                mutation = """
+                    mutation productCreate($input: ProductInput!, $media: [CreateMediaInput!]!) {
+                    productCreate(input: $input, media: $media) {
+                        product { id }
                     }
                     }"""
-            res = self.deploy_mutation(mutation, {"input": payload})
-            if variants_create:
+                res = self.deploy_mutation(mutation, {"input": payload, "media": media})
+                self.post_message(res)
                 product_id = res["data"]["productCreate"]["product"]["id"]
-                mutation = """
-                    mutation productVariantsBulkCreate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-                    productVariantsBulkCreate(productId: $productId, strategy: REMOVE_STANDALONE_VARIANT, variants: $variants) {
-                        product {
-                            id
-                        }
-                        productVariants {
-                            id
-                        }
-                    }
-                    }"""
-                res = self.deploy_mutation(mutation, {"productId": product_id, "variants": variants_create})
-        return res
+                if media:
+                    self._wait_for_media_ready(product_id, expected_count=len(media))
+                res = self._bulk_create_variants(product_id, variants_create, remove_standalone=True) or res
+            return res
+        finally:
+            if s3_client and uploaded_keys:
+                cleanup_temp_images(s3_client, uploaded_keys)
 
     def order_lookups(self, payload):
         lineitems = payload["lineItems"]
