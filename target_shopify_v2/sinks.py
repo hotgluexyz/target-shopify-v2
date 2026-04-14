@@ -32,8 +32,7 @@ class ProductsSink(shopifyGraphQLV2Sink):
     def upsert_record(self, record: dict, context: dict) -> None:
         state_updates = dict()
         if record:
-            res = self.upload_product(record)
-            product_id = res.get("data", {}).get("productCreate", {}).get("product", {}).get("id")
+            product_id = self.upload_product(record)
             self.logger.info(f"Returning {product_id}, True, {state_updates}")
             return product_id, True, state_updates
 
