@@ -459,6 +459,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
                 if "gid://shopify/Product/" not in payload["id"]:
                     payload["id"] = "gid://shopify/Product/" + str(payload["id"])
 
+                product_id = payload["id"]
                 variants_update, variants_create = self._split_variants(payload.pop("variants", []))
 
                 mutation = """
@@ -470,9 +471,9 @@ class shopifyGraphQLV2Sink(HotglueSink):
                 res = self.deploy_mutation(mutation, {"input": payload, "media": media})
                 self.post_message(res)
                 if media:
-                    self._wait_for_media_ready(payload["id"], expected_count=len(media))
-                res = self._bulk_update_variants(payload["id"], variants_update) or res
-                res = self._bulk_create_variants(payload["id"], variants_create) or res
+                    self._wait_for_media_ready(product_id, expected_count=len(media))
+                self._bulk_update_variants(product_id, variants_update)
+                self._bulk_create_variants(product_id, variants_create)
             else:
                 variants_create = payload.pop("variants", [])
                 for v in variants_create:
@@ -489,8 +490,8 @@ class shopifyGraphQLV2Sink(HotglueSink):
                 product_id = res["data"]["productCreate"]["product"]["id"]
                 if media:
                     self._wait_for_media_ready(product_id, expected_count=len(media))
-                res = self._bulk_create_variants(product_id, variants_create, remove_standalone=True) or res
-            return res
+                self._bulk_create_variants(product_id, variants_create, remove_standalone=True)
+            return product_id
         finally:
             if s3_client and uploaded_keys:
                 cleanup_temp_images(s3_client, uploaded_keys)
