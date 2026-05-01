@@ -36,3 +36,4 @@ build-backend = "poetry.core.masonry.api"
 [tool.poetry.scripts]
 # CLI declaration
 target-shopify-v2 = 'target_shopify_v2.target:TargetTargetShopifyV2.cli'
+target-shopify = 'target_shopify_v2.target:TargetTargetShopifyV2.cli'
