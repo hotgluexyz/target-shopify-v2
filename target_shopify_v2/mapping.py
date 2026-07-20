@@ -138,6 +138,10 @@ class UnifiedMapping:
                 variant_dictionary["metafields"] = variant_metafields
             payload["variants"].append(variant_dictionary)
 
+        suppliers = record.get("suppliers") or []
+        if suppliers and suppliers[0].get("name"):
+            payload["vendor"] = suppliers[0]["name"]
+
         if "short_description" in record:
             payload["seo"] = {"description": record["short_description"]}
 
