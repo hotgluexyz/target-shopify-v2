@@ -108,6 +108,14 @@ class UnifiedMapping:
                 inv = variant_dictionary.setdefault("inventoryItem", {})
                 inv["cost"] = variant["cost"]
                 inv["tracked"] = True
+            if variant.get("weight") is not None:
+                # unit is the Shopify WeightUnit enum (GRAMS/KILOGRAMS/OUNCES/POUNDS).
+                variant_dictionary.setdefault("inventoryItem", {})["measurement"] = {
+                    "weight": {
+                        "unit": variant.get("mass_unit", "POUNDS"),
+                        "value": variant["weight"],
+                    }
+                }
             if variant.get("id"):
                 if "gid://shopify/ProductVariant/" not in variant["id"]:
                     variant_dictionary["id"] = "gid://shopify/ProductVariant/" + str(
