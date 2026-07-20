@@ -1,6 +1,5 @@
 import json
 import os
-from cgitb import lookup
 
 __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
 
@@ -46,7 +45,7 @@ class UnifiedMapping:
     ):
         if addresses:
             address = {}
-            countries = self.read_json_file(f"countries.json")
+            countries = self.read_json_file("countries.json")
             for key in address_mapping.keys():
                 if key in addresses:
                     address[address_mapping[key]] = addresses[key]
@@ -99,8 +98,6 @@ class UnifiedMapping:
             if variant.get("price"):
                 variant_dictionary["price"] = variant.get("price")
             if variant.get("id"):
-                if "gid://shopify/ProductVariant/" not in variant["id"]:
-                    id = "gid://shopify/ProductVariant/" + str(variant["id"])
                 variant_dictionary["id"] = variant["id"]
             if variant.get("sku"):
                 variant_dictionary.setdefault("inventoryItem", {})["sku"] = variant["sku"]

@@ -5,7 +5,6 @@ import re
 import time
 
 import requests
-from singer_sdk.sinks import RecordSink
 
 from target_shopify_v2.mapping import UnifiedMapping
 from target_shopify_v2.s3_image import (
@@ -63,7 +62,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
         elif "order_number" in record:
             return self.update_order_by_number(record)
         else:
-            if not "order_number" in record:
+            if "order_number" not in record:
                 if "customer_name" in record:
                     if record["customer_name"] is not None:
                         customer = self.query_customers(record["customer_name"])
@@ -428,7 +427,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
                 if len(locations["data"]["locations"]["edges"]) > 0:
                     locations = locations["data"]["locations"]["edges"]
                     valid_locations = [
-                        l["node"] for l in locations if l["node"]["isActive"]
+                        loc["node"] for loc in locations if loc["node"]["isActive"]
                     ]
                     if len(valid_locations) == 1:
                         location = valid_locations[0]
@@ -437,9 +436,9 @@ class shopifyGraphQLV2Sink(HotglueSink):
                         if "name" in record["location"]:
                             location = next(
                                 (
-                                    l
-                                    for l in valid_locations
-                                    if l["name"] == record["location"]["name"]
+                                    loc
+                                    for loc in valid_locations
+                                    if loc["name"] == record["location"]["name"]
                                 ),
                                 None,
                             )
@@ -786,7 +785,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
             else:
                 raise Exception("Unrecognized operation for inventory Update")
 
-            if quantity == None:
+            if quantity is None:
                 raise Exception("No quantity set for inventory Update")
 
             self.logger.info("Updating inventory for Inventory ID {}".format(inventory["inventory_id"]))

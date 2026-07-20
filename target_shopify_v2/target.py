@@ -1,7 +1,6 @@
 """TargetShopifyV2 target class."""
 
 from singer_sdk import typing as th
-from singer_sdk.target_base import Target
 from target_hotglue.target import TargetHotglue
 from target_shopify_v2.sinks import (
     SalesOrdersSink,
