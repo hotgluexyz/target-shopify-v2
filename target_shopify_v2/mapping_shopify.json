@@ -33,7 +33,7 @@
       "id":"id",
       "name":"title",
       "description":"descriptionHtml",
-      "published":"published"
+      "published":"published",
+      "vendor":"vendor"
     }
-    
 }
