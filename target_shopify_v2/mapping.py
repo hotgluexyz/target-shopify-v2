@@ -102,9 +102,7 @@ class UnifiedMapping:
             if variant.get("sku"):
                 variant_dictionary.setdefault("inventoryItem", {})["sku"] = variant["sku"]
             if variant.get("cost"):
-                inv = variant_dictionary.setdefault("inventoryItem", {})
-                inv["cost"] = variant["cost"]
-                inv["tracked"] = True
+                variant_dictionary.setdefault("inventoryItem", {})["cost"] = variant["cost"]
             if variant.get("weight") is not None:
                 # unit is the Shopify WeightUnit enum (GRAMS/KILOGRAMS/OUNCES/POUNDS).
                 variant_dictionary.setdefault("inventoryItem", {})["measurement"] = {
@@ -125,12 +123,21 @@ class UnifiedMapping:
                         o["value"] for o in variant["options"] if o["name"] == option
                     )
                     variant_dictionary["options"].append(value)
-            if len(location_id) > 0:
-                if variant.get("available_quantity"):
+            inv = variant_dictionary.setdefault("inventoryItem", {})
+            if "available_quantity" in variant and variant["available_quantity"] is not None:
+                inv["tracked"] = True
+                if location_id:
                     variant_dictionary["inventoryQuantities"] = {
                         "availableQuantity": variant["available_quantity"],
                         "locationId": location_id,
                     }
+            elif "available_quantity" in variant and variant["available_quantity"] is None:
+                # If available_quantity is None, set tracked to False
+                inv["tracked"] = False
+            elif not variant.get("id"):
+                # New variant with omitted available_quantity: default to not tracked
+                inv["tracked"] = False
+
             if "image_urls" in variant:
                 images.extend([{"src": i} for i in variant["image_urls"]])
             variant_metafields = [self._build_metafield(f) for f in variant.get("custom_fields", [])]
