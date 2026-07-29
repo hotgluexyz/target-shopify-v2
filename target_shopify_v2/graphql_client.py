@@ -13,9 +13,9 @@ from target_shopify_v2.s3_image import (
     has_base64_images,
     resolve_blobs_to_urls,
 )
-from target_hotglue.client import HotglueSink
+from hotglue_singer_sdk.target_sdk.client import HotglueSink
 from datetime import datetime
-from singer_sdk.exceptions import FatalAPIError, RetriableAPIError
+from hotglue_singer_sdk.exceptions import FatalAPIError
 
 
 class shopifyGraphQLV2Sink(HotglueSink):
@@ -874,12 +874,4 @@ class shopifyGraphQLV2Sink(HotglueSink):
         """Validate HTTP response."""
         if response.json().get("errors"):
             raise FatalAPIError(response.text)
-        if response.status_code in [429] or 500 <= response.status_code < 600:
-            msg = self.response_error_message(response)
-            raise RetriableAPIError(msg, response)
-        elif 400 <= response.status_code < 500:
-            try:
-                msg = response.text
-            except:
-                msg = self.response_error_message(response)
-            raise FatalAPIError(msg)
+        super().validate_response(response)

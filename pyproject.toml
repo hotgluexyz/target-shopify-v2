@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "target-shopify-v2"
-version = "0.0.5"
-description = "`target-shopify-v2` is a Singer target for TargetShopifyV2, built with the Meltano SDK for Singer Targets."
+version = "0.0.6"
+description = "`target-shopify-v2` is a Singer target for Shopify, built with hotglue-singer-sdk."
 authors = ["Adil Ahmed"]
 keywords = [
     "ELT",
@@ -13,8 +13,7 @@ license = "Apache 2.0"
 python = "<3.11,>=3.7.1"
 requests = "^2.25.1"
 boto3 = "^1.20"
-singer-sdk = "0.9.0"
-target-hotglue = {git = "https://gitlab.com/hotglue/target-hotglue-sdk.git", rev = "main"}
+hotglue-singer-sdk = "^1.0.40"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.5"
