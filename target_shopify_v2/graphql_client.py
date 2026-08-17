@@ -223,29 +223,43 @@ class shopifyGraphQLV2Sink(HotglueSink):
         self.post_message(res_return)
         return res_return.get('data', {}).get('fulfillmentCreateV2', {}).get('fulfillment', {}).get('id')
 
+    @classmethod
+    def build_requested_quantities(cls, requested_items):
+        """Total the requested quantity per order line item, rejecting malformed entries.
+
+        Every entry is validated: an entry with no id, or with a quantity that is not a
+        positive whole number, raises rather than being skipped. Silently dropping one
+        entry while fulfilling its siblings is the same class of bug this method exists
+        to fix.
+        """
+        outstanding = {}
+        for item in requested_items:
+            if not isinstance(item, dict):
+                raise ValueError(f"Fulfillment line item must be an object, got {item!r}")
+
+            key = cls.normalize_line_item_id(item.get("id"))
+            if not key:
+                raise ValueError(f"Fulfillment line item is missing an id: {item!r}")
+
+            outstanding[key] = outstanding.get(key, 0) + cls.validate_quantity(item.get("quantity"))
+
+        return outstanding
+
     @staticmethod
     def validate_quantity(raw_quantity):
-        """A requested fulfillment quantity must be a positive whole number.
+        """A requested fulfillment quantity must be a positive integer.
 
-        `int()` would truncate, so a quantity of 1.9 would silently fulfill 1 - a
-        different quantity than the caller asked for. Integral floats (2.0) are accepted
-        because JSON producers commonly emit whole numbers that way; booleans are
-        rejected explicitly because `bool` is a subclass of `int` in Python.
+        Shopify types `FulfillmentOrderLineItemInput.quantity` as `Int!`, so anything
+        else is invalid at the API regardless; rejecting it here fails fast with a clear
+        message instead of sending a request Shopify will refuse, and avoids the silent
+        truncation `int()` would do. `bool` is rejected explicitly because it subclasses
+        `int` in Python.
         """
-        if isinstance(raw_quantity, bool) or not isinstance(raw_quantity, (int, float)):
+        if isinstance(raw_quantity, bool) or not isinstance(raw_quantity, int) or raw_quantity <= 0:
             raise ValueError(
-                f"Fulfillment line item quantity must be a positive whole number, got {raw_quantity!r}"
+                f"Fulfillment line item quantity must be a positive integer, got {raw_quantity!r}"
             )
-        if isinstance(raw_quantity, float) and not raw_quantity.is_integer():
-            raise ValueError(
-                f"Fulfillment line item quantity must be a whole number, got {raw_quantity!r}"
-            )
-        quantity = int(raw_quantity)
-        if quantity <= 0:
-            raise ValueError(
-                f"Fulfillment line item quantity must be greater than zero, got {raw_quantity!r}"
-            )
-        return quantity
+        return raw_quantity
 
     @staticmethod
     def normalize_line_item_id(line_item_id):
@@ -270,16 +284,14 @@ class shopifyGraphQLV2Sink(HotglueSink):
         locations, so the requested quantity is consumed across fulfillment orders in the
         order Shopify returns them, clamped to each line's remainingQuantity.
         """
+        # Validate every requested entry BEFORE touching Shopify: a malformed request
+        # should fail with a clear error rather than a lookup error, and should not
+        # spend query capacity first.
+        outstanding = self.build_requested_quantities(requested_items)
+
         fulfillment_orders = self.fetch_all_fulfillment_order_line_items(order_id)
         if not fulfillment_orders:
             raise Exception(f"There are no fulfillment orders for this order: {order_id}")
-
-        outstanding = {}
-        for item in requested_items:
-            key = self.normalize_line_item_id(item.get("id"))
-            if key is None:
-                continue
-            outstanding[key] = outstanding.get(key, 0) + self.validate_quantity(item.get("quantity"))
 
         fulfill_items = []
         for node in fulfillment_orders:

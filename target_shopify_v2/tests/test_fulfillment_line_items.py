@@ -25,82 +25,71 @@ def fulfillment_order(fo_id, *line_item_pages):
     return {"id": fo_id, "line_item_pages": list(line_item_pages) or [[]]}
 
 
-def _connection(nodes, has_next, cursor_prefix):
-    return {
-        "pageInfo": {"hasNextPage": has_next},
-        "edges": [
-            {"cursor": f"{cursor_prefix}{index}", "node": node}
-            for index, node in enumerate(nodes)
-        ],
-    }
-
-
 @pytest.fixture
 def fulfillment_sink(monkeypatch):
     """A sink whose Shopify calls are captured rather than sent.
 
     `fo_pages` is a list of pages, each a list of fulfillment_order() specs, so tests
     can force pagination on either connection without needing 25+ rows.
+
+    Every cursor issued is globally unique, and each stub asserts that the caller sent
+    back exactly the cursor the stub last emitted for that connection. An implementation
+    that passes `None`, a stale cursor, or a cursor from the wrong connection fails here
+    rather than quietly appearing to paginate.
     """
     sink = object.__new__(shopifyGraphQLV2Sink)
     captured = {"fo_pages": [[]], "calls": []}
+    state = {"cursor_seq": 0, "fo_page": 0, "fo_cursor": None, "li": {}}
 
     monkeypatch.setattr(sink, "logger", logging.getLogger("test"), raising=False)
     monkeypatch.setattr(sink, "name", "Fulfillments", raising=False)
 
+    def connection(nodes, has_next):
+        """Build a connection with unique cursors; also return its last cursor."""
+        edges = []
+        for node in nodes:
+            state["cursor_seq"] += 1
+            edges.append({"cursor": f"cursor-{state['cursor_seq']}", "node": node})
+        payload = {"pageInfo": {"hasNextPage": has_next}, "edges": edges}
+        return payload, (edges[-1]["cursor"] if edges else None)
+
     def query_fulfillment_order_line_items(order_id, after=None):
         captured["calls"].append(("fo_page", after))
-        index = 0 if after is None else int(after.replace("fo", "")) + 1
-        pages = captured["fo_pages"]
-        nodes = [
-            {
-                "id": spec["id"],
-                "lineItems": _connection(
-                    spec["line_item_pages"][0],
-                    has_next=len(spec["line_item_pages"]) > 1,
-                    cursor_prefix=f"{spec['id']}-li",
-                ),
-            }
-            for spec in pages[index]
-        ]
-        return {
-            "data": {
-                "order": {
-                    "fulfillmentOrders": _connection(
-                        nodes, has_next=index + 1 < len(pages), cursor_prefix="fo"
-                    )
-                }
-            }
-        }
+        assert after == state["fo_cursor"], (
+            f"fulfillmentOrders cursor: expected {state['fo_cursor']!r}, got {after!r}"
+        )
 
-    # Serve successive line-item pages per fulfillment order.
-    served = {}
+        pages = captured["fo_pages"]
+        page_index = state["fo_page"]
+        nodes = []
+        for spec in pages[page_index]:
+            line_item_pages = spec["line_item_pages"]
+            payload, last = connection(line_item_pages[0], has_next=len(line_item_pages) > 1)
+            state["li"][spec["id"]] = {"page": 0, "cursor": last}
+            nodes.append({"id": spec["id"], "lineItems": payload})
+
+        payload, last = connection(nodes, has_next=page_index + 1 < len(pages))
+        state["fo_page"] = page_index + 1
+        state["fo_cursor"] = last
+        return {"data": {"order": {"fulfillmentOrders": payload}}}
 
     def li_page(fulfillment_order_id, after):
         captured["calls"].append(("li_page", fulfillment_order_id, after))
-        # The cursor must be the last edge of the page we already served, otherwise an
-        # implementation that passes None (or the wrong cursor) would still pass below.
-        page_index = served.get(fulfillment_order_id, 0)
-        expected_after = f"{fulfillment_order_id}-li{page_index}"
-        assert after == expected_after, f"expected cursor {expected_after!r}, got {after!r}"
+        tracker = state["li"][fulfillment_order_id]
+        assert after == tracker["cursor"], (
+            f"lineItems cursor for {fulfillment_order_id}: "
+            f"expected {tracker['cursor']!r}, got {after!r}"
+        )
+
         spec = next(
             s for page in captured["fo_pages"] for s in page if s["id"] == fulfillment_order_id
         )
-        next_index = served.get(fulfillment_order_id, 0) + 1
-        served[fulfillment_order_id] = next_index
         pages = spec["line_item_pages"]
-        nodes = pages[next_index] if next_index < len(pages) else []
-        return {
-            "data": {
-                "node": {
-                    "lineItems": _connection(
-                        nodes,
-                        has_next=next_index + 1 < len(pages),
-                        cursor_prefix=f"{fulfillment_order_id}-li",
-                    )
-                }
-            }
-        }
+        tracker["page"] += 1
+        nodes = pages[tracker["page"]] if tracker["page"] < len(pages) else []
+        payload, last = connection(nodes, has_next=tracker["page"] + 1 < len(pages))
+        tracker["cursor"] = last
+        return {"data": {"node": {"lineItems": payload}}}
 
     monkeypatch.setattr(sink, "query_fulfillment_order_line_items",
                         query_fulfillment_order_line_items, raising=False)
@@ -222,7 +211,9 @@ def test_requested_item_on_a_later_fulfillment_order_page_is_found(fulfillment_s
             {"id": "gid://shopify/FulfillmentOrderLineItem/2", "quantity": 1}
         ],
     }]
-    assert ("fo_page", "fo0") in captured["calls"], "second fulfillmentOrders page not requested"
+    fo_calls = [call for call in captured["calls"] if call[0] == "fo_page"]
+    assert len(fo_calls) == 2, "second fulfillmentOrders page not requested"
+    assert fo_calls[1][1] is not None, "second page requested without a cursor"
 
 
 def test_requested_item_on_a_later_line_item_page_is_found(fulfillment_sink):
@@ -272,9 +263,92 @@ def test_already_fulfilled_lines_are_not_refulfilled(fulfillment_sink):
         )
 
 
-@pytest.mark.parametrize("bad_quantity", [1.9, 0, -1, True, None, "2", object()])
+def test_item_on_the_third_fulfillment_order_page_is_found(fulfillment_sink):
+    """Three pages: cursors must stay unique and keep advancing."""
+    sink, captured = fulfillment_sink
+    captured["fo_pages"] = [
+        [fulfillment_order(FO_A, [line_item("gid://shopify/FulfillmentOrderLineItem/1", "901", 5)])],
+        [fulfillment_order(FO_B, [line_item("gid://shopify/FulfillmentOrderLineItem/2", "902", 5)])],
+        [fulfillment_order("gid://shopify/FulfillmentOrder/3333",
+                           [line_item("gid://shopify/FulfillmentOrderLineItem/3", "111", 5)])],
+    ]
+
+    sink.fulfil_order(
+        {"fulfilled": True, "line_items": [{"id": "111", "quantity": 1}]}, "1234567890"
+    )
+
+    assert sent_line_items(captured) == [{
+        "fulfillmentOrderId": "gid://shopify/FulfillmentOrder/3333",
+        "fulfillmentOrderLineItems": [
+            {"id": "gid://shopify/FulfillmentOrderLineItem/3", "quantity": 1}
+        ],
+    }]
+    assert len([c for c in captured["calls"] if c[0] == "fo_page"]) == 3
+
+
+def test_item_on_the_third_line_item_page_is_found(fulfillment_sink):
+    """Three line-item pages within one fulfillment order."""
+    sink, captured = fulfillment_sink
+    captured["fo_pages"] = [[fulfillment_order(
+        FO_A,
+        [line_item("gid://shopify/FulfillmentOrderLineItem/1", "901", 5)],
+        [line_item("gid://shopify/FulfillmentOrderLineItem/2", "902", 5)],
+        [line_item("gid://shopify/FulfillmentOrderLineItem/3", "111", 5)],
+    )]]
+
+    sink.fulfil_order(
+        {"fulfilled": True, "line_items": [{"id": "111", "quantity": 2}]}, "1234567890"
+    )
+
+    assert sent_line_items(captured)[0]["fulfillmentOrderLineItems"] == [
+        {"id": "gid://shopify/FulfillmentOrderLineItem/3", "quantity": 2}
+    ]
+    assert len([c for c in captured["calls"] if c[0] == "li_page"]) == 2
+
+
+@pytest.mark.parametrize("bad_item", [
+    {"quantity": 1},                      # no id at all
+    {"id": None, "quantity": 1},          # explicit null id
+    {"id": "", "quantity": 1},            # empty id
+    "not-an-object",                      # wrong entry type
+])
+def test_malformed_entries_are_rejected_not_skipped(fulfillment_sink, bad_item):
+    """A malformed entry must not be dropped while its siblings are fulfilled."""
+    sink, captured = fulfillment_sink
+    captured["fo_pages"] = [[fulfillment_order(
+        FO_A, [line_item("gid://shopify/FulfillmentOrderLineItem/1", "111", 5)]
+    )]]
+
+    with pytest.raises(ValueError):
+        sink.fulfil_order(
+            {"fulfilled": True, "line_items": [{"id": "111", "quantity": 1}, bad_item]},
+            "1234567890",
+        )
+    assert "variables" not in captured
+
+
+def test_invalid_input_makes_no_shopify_lookup(fulfillment_sink):
+    """Validation runs before the lookup, so a bad request spends no query capacity."""
+    sink, captured = fulfillment_sink
+
+    with pytest.raises(ValueError):
+        sink.fulfil_order(
+            {"fulfilled": True, "line_items": [{"id": "111", "quantity": 1.9}]}, "1234567890"
+        )
+
+    assert not [call for call in captured["calls"] if call[0] in ("fo_page", "li_page")]
+
+
+@pytest.mark.parametrize(
+    "bad_quantity",
+    [1.9, 2.0, float("inf"), float("nan"), 0, -1, True, None, "2", object()],
+)
 def test_invalid_quantities_are_rejected(fulfillment_sink, bad_quantity):
-    """int() would truncate 1.9 to 1 and fulfill a different amount than requested."""
+    """Shopify types quantity as Int!, so only positive ints are valid.
+
+    Floats are rejected outright rather than coerced - int() would truncate 1.9 to 1,
+    and admitting floats at all drags in inf/nan and precision edge cases for no gain.
+    """
     sink, captured = fulfillment_sink
     captured["fo_pages"] = [[fulfillment_order(
         FO_A, [line_item("gid://shopify/FulfillmentOrderLineItem/1", "111", 5)]
@@ -286,22 +360,6 @@ def test_invalid_quantities_are_rejected(fulfillment_sink, bad_quantity):
             "1234567890",
         )
     assert "variables" not in captured, "no mutation may be sent for an invalid quantity"
-
-
-def test_integral_float_quantity_is_accepted(fulfillment_sink):
-    """JSON producers commonly emit whole numbers as floats; 2.0 is unambiguous."""
-    sink, captured = fulfillment_sink
-    captured["fo_pages"] = [[fulfillment_order(
-        FO_A, [line_item("gid://shopify/FulfillmentOrderLineItem/1", "111", 5)]
-    )]]
-
-    sink.fulfil_order(
-        {"fulfilled": True, "line_items": [{"id": "111", "quantity": 2.0}]}, "1234567890"
-    )
-
-    assert sent_line_items(captured)[0]["fulfillmentOrderLineItems"] == [
-        {"id": "gid://shopify/FulfillmentOrderLineItem/1", "quantity": 2}
-    ]
 
 
 def test_empty_line_items_list_is_rejected(fulfillment_sink):
