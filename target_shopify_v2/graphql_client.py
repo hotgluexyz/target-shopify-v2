@@ -181,12 +181,9 @@ class shopifyGraphQLV2Sink(HotglueSink):
             order_id = "gid://shopify/Order/" + order_id
 
         # SalesOrders records reach this method too, and they carry the ORDER's own
-        # line_items - which are not fulfillment line items. Only the Fulfillments sink
-        # may scope a fulfillment. `self.name` is consulted lazily so sinks that never
-        # send line_items are unaffected.
-        requested_items = record.get("line_items")
-        if requested_items is not None and self.name != "Fulfillments":
-            requested_items = None
+        # line_items, which are not fulfillment line items. Only the Fulfillments sink
+        # may scope a fulfillment.
+        requested_items = record.get("line_items") if self.name == "Fulfillments" else None
 
         if requested_items is not None and not requested_items:
             # An empty list is ambiguous: omitting the key means "fulfill the whole
