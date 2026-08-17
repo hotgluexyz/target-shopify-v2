@@ -180,7 +180,14 @@ class shopifyGraphQLV2Sink(HotglueSink):
         if not order_id.startswith("gid://shopify/Order/"):
             order_id = "gid://shopify/Order/" + order_id
 
+        # SalesOrders records reach this method too, and they carry the ORDER's own
+        # line_items - which are not fulfillment line items. Only the Fulfillments sink
+        # may scope a fulfillment. `self.name` is consulted lazily so sinks that never
+        # send line_items are unaffected.
         requested_items = record.get("line_items")
+        if requested_items is not None and self.name != "Fulfillments":
+            requested_items = None
+
         if requested_items is not None and not requested_items:
             # An empty list is ambiguous: omitting the key means "fulfill the whole
             # order", so silently treating [] the same way would over-fulfill.
@@ -242,14 +249,9 @@ class shopifyGraphQLV2Sink(HotglueSink):
         locations, so the requested quantity is consumed across fulfillment orders in the
         order Shopify returns them, clamped to each line's remainingQuantity.
         """
-        order_details = self.query_fulfillment_order_line_items(order_id)
-        order = (order_details.get("data") or {}).get("order")
-        if not order:
-            raise Exception(f"Could not load fulfillment orders for order: {order_id}")
-
-        fulfillment_orders = order["fulfillmentOrders"]["edges"]
+        fulfillment_orders = self.fetch_all_fulfillment_order_line_items(order_id)
         if not fulfillment_orders:
-            raise Exception(f"There are no fulfillment orders for this order: {order}")
+            raise Exception(f"There are no fulfillment orders for this order: {order_id}")
 
         outstanding = {}
         for item in requested_items:
@@ -259,11 +261,9 @@ class shopifyGraphQLV2Sink(HotglueSink):
             outstanding[key] = outstanding.get(key, 0) + int(item.get("quantity") or 0)
 
         fulfill_items = []
-        for edge in fulfillment_orders:
-            node = edge["node"]
+        for node in fulfillment_orders:
             entries = []
-            for line_item_edge in (node.get("lineItems") or {}).get("edges", []):
-                fulfillment_order_line_item = line_item_edge["node"]
+            for fulfillment_order_line_item in node.get("lineItems") or []:
                 key = self.normalize_line_item_id(
                     (fulfillment_order_line_item.get("lineItem") or {}).get("id")
                 )
@@ -299,21 +299,71 @@ class shopifyGraphQLV2Sink(HotglueSink):
 
         return fulfill_items
 
-    def query_fulfillment_order_line_items(self, order_id):
-        """Fetch fulfillment orders with the mapping needed to target individual line items.
+    # Page size for both fulfillment order connections. Kept modest on purpose: nested
+    # connections multiply for Shopify's calculated query cost and the per-query ceiling
+    # is 1000 points, so 25x25 stays well inside it. Both levels are paginated, so this
+    # bounds cost per request rather than bounding how much data is retrieved.
+    FULFILLMENT_ORDER_PAGE_SIZE = 25
 
-        Page sizes are kept small deliberately: nested connections multiply for Shopify's
-        calculated query cost, and the per-query ceiling is 1000 points.
+    def fetch_all_fulfillment_order_line_items(self, order_id):
+        """Every fulfillment order for an order, each with ALL of its line items.
+
+        Both connections are paginated to exhaustion. Returns a flat list of
+        ``{"id": ..., "lineItems": [ {id, remainingQuantity, lineItem: {id}}, ... ]}``.
         """
+        fulfillment_orders = []
+        cursor = None
+
+        while True:
+            response = self.query_fulfillment_order_line_items(order_id, after=cursor)
+            order = (response.get("data") or {}).get("order")
+            if not order:
+                raise Exception(f"Could not load fulfillment orders for order: {order_id}")
+
+            connection = order["fulfillmentOrders"]
+            edges = connection.get("edges") or []
+            for edge in edges:
+                node = edge["node"]
+                fulfillment_orders.append({
+                    "id": node["id"],
+                    "lineItems": self._all_line_items_for(node),
+                })
+
+            if not edges or not (connection.get("pageInfo") or {}).get("hasNextPage"):
+                return fulfillment_orders
+            cursor = edges[-1]["cursor"]
+
+    def _all_line_items_for(self, fulfillment_order_node):
+        """Drain a fulfillment order's lineItems connection, following cursors."""
+        connection = fulfillment_order_node.get("lineItems") or {}
+        edges = connection.get("edges") or []
+        line_items = [edge["node"] for edge in edges]
+
+        while (connection.get("pageInfo") or {}).get("hasNextPage") and edges:
+            response = self.query_fulfillment_order_line_items_page(
+                fulfillment_order_node["id"], edges[-1]["cursor"]
+            )
+            connection = ((response.get("data") or {}).get("node") or {}).get("lineItems") or {}
+            edges = connection.get("edges") or []
+            line_items.extend(edge["node"] for edge in edges)
+
+        return line_items
+
+    def query_fulfillment_order_line_items(self, order_id, after=None):
+        """One page of fulfillment orders, each with its first page of line items."""
         query = """
-                query($id:ID!){
+                query($id: ID!, $first: Int!, $after: String) {
                     order(id: $id) {
-                        fulfillmentOrders(first: 25) {
+                        fulfillmentOrders(first: $first, after: $after) {
+                            pageInfo { hasNextPage }
                             edges {
+                                cursor
                                 node {
                                     id
-                                    lineItems(first: 25) {
+                                    lineItems(first: $first) {
+                                        pageInfo { hasNextPage }
                                         edges {
+                                            cursor
                                             node {
                                                 id
                                                 remainingQuantity
@@ -329,7 +379,38 @@ class shopifyGraphQLV2Sink(HotglueSink):
                     }
                 }
         """
-        return self.shopify_query(query, {"id": order_id})
+        return self.shopify_query(
+            query,
+            {"id": order_id, "first": self.FULFILLMENT_ORDER_PAGE_SIZE, "after": after},
+        )
+
+    def query_fulfillment_order_line_items_page(self, fulfillment_order_id, after):
+        """A further page of one fulfillment order's line items."""
+        query = """
+                query($id: ID!, $first: Int!, $after: String) {
+                    node(id: $id) {
+                        ... on FulfillmentOrder {
+                            lineItems(first: $first, after: $after) {
+                                pageInfo { hasNextPage }
+                                edges {
+                                    cursor
+                                    node {
+                                        id
+                                        remainingQuantity
+                                        lineItem {
+                                            id
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+        """
+        return self.shopify_query(
+            query,
+            {"id": fulfillment_order_id, "first": self.FULFILLMENT_ORDER_PAGE_SIZE, "after": after},
+        )
 
     def query_sku(self, sku):
         query = """
