@@ -224,6 +224,30 @@ class shopifyGraphQLV2Sink(HotglueSink):
         return res_return.get('data', {}).get('fulfillmentCreateV2', {}).get('fulfillment', {}).get('id')
 
     @staticmethod
+    def validate_quantity(raw_quantity):
+        """A requested fulfillment quantity must be a positive whole number.
+
+        `int()` would truncate, so a quantity of 1.9 would silently fulfill 1 - a
+        different quantity than the caller asked for. Integral floats (2.0) are accepted
+        because JSON producers commonly emit whole numbers that way; booleans are
+        rejected explicitly because `bool` is a subclass of `int` in Python.
+        """
+        if isinstance(raw_quantity, bool) or not isinstance(raw_quantity, (int, float)):
+            raise ValueError(
+                f"Fulfillment line item quantity must be a positive whole number, got {raw_quantity!r}"
+            )
+        if isinstance(raw_quantity, float) and not raw_quantity.is_integer():
+            raise ValueError(
+                f"Fulfillment line item quantity must be a whole number, got {raw_quantity!r}"
+            )
+        quantity = int(raw_quantity)
+        if quantity <= 0:
+            raise ValueError(
+                f"Fulfillment line item quantity must be greater than zero, got {raw_quantity!r}"
+            )
+        return quantity
+
+    @staticmethod
     def normalize_line_item_id(line_item_id):
         """Reduce a Shopify line item id to its bare numeric form.
 
@@ -255,7 +279,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
             key = self.normalize_line_item_id(item.get("id"))
             if key is None:
                 continue
-            outstanding[key] = outstanding.get(key, 0) + int(item.get("quantity") or 0)
+            outstanding[key] = outstanding.get(key, 0) + self.validate_quantity(item.get("quantity"))
 
         fulfill_items = []
         for node in fulfillment_orders:

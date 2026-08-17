@@ -78,6 +78,11 @@ def fulfillment_sink(monkeypatch):
 
     def li_page(fulfillment_order_id, after):
         captured["calls"].append(("li_page", fulfillment_order_id, after))
+        # The cursor must be the last edge of the page we already served, otherwise an
+        # implementation that passes None (or the wrong cursor) would still pass below.
+        page_index = served.get(fulfillment_order_id, 0)
+        expected_after = f"{fulfillment_order_id}-li{page_index}"
+        assert after == expected_after, f"expected cursor {expected_after!r}, got {after!r}"
         spec = next(
             s for page in captured["fo_pages"] for s in page if s["id"] == fulfillment_order_id
         )
@@ -265,6 +270,38 @@ def test_already_fulfilled_lines_are_not_refulfilled(fulfillment_sink):
         sink.fulfil_order(
             {"fulfilled": True, "line_items": [{"id": "111", "quantity": 1}]}, "1234567890"
         )
+
+
+@pytest.mark.parametrize("bad_quantity", [1.9, 0, -1, True, None, "2", object()])
+def test_invalid_quantities_are_rejected(fulfillment_sink, bad_quantity):
+    """int() would truncate 1.9 to 1 and fulfill a different amount than requested."""
+    sink, captured = fulfillment_sink
+    captured["fo_pages"] = [[fulfillment_order(
+        FO_A, [line_item("gid://shopify/FulfillmentOrderLineItem/1", "111", 5)]
+    )]]
+
+    with pytest.raises(ValueError, match="quantity"):
+        sink.fulfil_order(
+            {"fulfilled": True, "line_items": [{"id": "111", "quantity": bad_quantity}]},
+            "1234567890",
+        )
+    assert "variables" not in captured, "no mutation may be sent for an invalid quantity"
+
+
+def test_integral_float_quantity_is_accepted(fulfillment_sink):
+    """JSON producers commonly emit whole numbers as floats; 2.0 is unambiguous."""
+    sink, captured = fulfillment_sink
+    captured["fo_pages"] = [[fulfillment_order(
+        FO_A, [line_item("gid://shopify/FulfillmentOrderLineItem/1", "111", 5)]
+    )]]
+
+    sink.fulfil_order(
+        {"fulfilled": True, "line_items": [{"id": "111", "quantity": 2.0}]}, "1234567890"
+    )
+
+    assert sent_line_items(captured)[0]["fulfillmentOrderLineItems"] == [
+        {"id": "gid://shopify/FulfillmentOrderLineItem/1", "quantity": 2}
+    ]
 
 
 def test_empty_line_items_list_is_rejected(fulfillment_sink):
