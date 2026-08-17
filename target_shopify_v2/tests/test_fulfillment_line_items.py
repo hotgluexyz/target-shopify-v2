@@ -54,6 +54,7 @@ def fulfillment_sink(monkeypatch):
         return payload, (edges[-1]["cursor"] if edges else None)
 
     def query_fulfillment_order_line_items(order_id, after=None):
+        """Serve one page of fulfillment orders, asserting the cursor sent back."""
         captured["calls"].append(("fo_page", after))
         assert after == state["fo_cursor"], (
             f"fulfillmentOrders cursor: expected {state['fo_cursor']!r}, got {after!r}"
@@ -74,6 +75,7 @@ def fulfillment_sink(monkeypatch):
         return {"data": {"order": {"fulfillmentOrders": payload}}}
 
     def li_page(fulfillment_order_id, after):
+        """Serve a further page of one fulfillment order's line items."""
         captured["calls"].append(("li_page", fulfillment_order_id, after))
         tracker = state["li"][fulfillment_order_id]
         assert after == tracker["cursor"], (
@@ -101,6 +103,7 @@ def fulfillment_sink(monkeypatch):
     )
 
     def deploy_mutation(mutation, variables):
+        """Capture the mutation variables instead of calling Shopify."""
         captured["variables"] = variables
         return {"data": {"fulfillmentCreateV2": {"fulfillment": {"id": FULFILLMENT_ID}}}}
 
@@ -110,6 +113,7 @@ def fulfillment_sink(monkeypatch):
 
 
 def sent_line_items(captured):
+    """The lineItemsByFulfillmentOrder actually sent to Shopify."""
     return captured["variables"]["fulfillment"]["lineItemsByFulfillmentOrder"]
 
 
@@ -124,6 +128,7 @@ def test_absent_line_items_still_fulfills_whole_order(fulfillment_sink):
 
 
 def test_partial_fulfillment_sends_only_requested_lines(fulfillment_sink):
+    """Only the requested line is fulfilled; its sibling in the same FO is left alone."""
     sink, captured = fulfillment_sink
     captured["fo_pages"] = [[fulfillment_order(FO_A, [
         line_item("gid://shopify/FulfillmentOrderLineItem/1", "111", 5),
@@ -144,6 +149,7 @@ def test_partial_fulfillment_sends_only_requested_lines(fulfillment_sink):
 
 @pytest.mark.parametrize("requested_id", ["111", 111, "gid://shopify/LineItem/111"])
 def test_line_item_ids_match_in_either_form(fulfillment_sink, requested_id):
+    """Callers may send a bare numeric id or a gid; Shopify returns gids."""
     sink, captured = fulfillment_sink
     captured["fo_pages"] = [[fulfillment_order(
         FO_A, [line_item("gid://shopify/FulfillmentOrderLineItem/1", "111", 3)]
@@ -236,6 +242,7 @@ def test_requested_item_on_a_later_line_item_page_is_found(fulfillment_sink):
 
 
 def test_quantity_is_clamped_to_remaining(fulfillment_sink):
+    """Never request more than the fulfillment order line item has left."""
     sink, captured = fulfillment_sink
     captured["fo_pages"] = [[fulfillment_order(
         FO_A, [line_item("gid://shopify/FulfillmentOrderLineItem/1", "111", 1)]
@@ -389,6 +396,7 @@ def test_unfulfilled_record_short_circuits(fulfillment_sink, monkeypatch):
     sink, captured = fulfillment_sink
 
     def fail_on_shopify_call(*args, **kwargs):
+        """Any Shopify call in this test is a failure."""
         pytest.fail("unfulfilled records must not call Shopify")
 
     monkeypatch.setattr(sink, "query_order", fail_on_shopify_call, raising=False)

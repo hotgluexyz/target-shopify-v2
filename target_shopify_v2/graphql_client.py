@@ -153,6 +153,14 @@ class shopifyGraphQLV2Sink(HotglueSink):
         return order_id
 
     def fulfil_order(self, record, order_id, payload=None):
+        """Create a Shopify fulfillment for a record, optionally scoped to line items.
+
+        With no ``line_items`` on the record, every remaining item on every fulfillment
+        order is fulfilled - the long-standing behavior. With ``line_items``, only those
+        order line items are fulfilled, resolved to their FulfillmentOrderLineItem ids.
+
+        Returns the new fulfillment's id, or ``None`` if the record is not fulfilled.
+        """
         mutation = """
             mutation fulfillmentCreateV2($fulfillment: FulfillmentV2Input!) {
             fulfillmentCreateV2(fulfillment: $fulfillment) {
