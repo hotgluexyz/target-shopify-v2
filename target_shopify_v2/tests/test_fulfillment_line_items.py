@@ -42,7 +42,9 @@ def fulfillment_sink(monkeypatch):
     state = {"cursor_seq": 0, "fo_page": 0, "fo_cursor": None, "li": {}}
 
     monkeypatch.setattr(sink, "logger", logging.getLogger("test"), raising=False)
-    monkeypatch.setattr(sink, "name", "Fulfillments", raising=False)
+    # `name` is a read-only abstract property on HotglueBaseSink, so it has to be patched
+    # on the class - an instance setattr raises before monkeypatch can record the old value.
+    monkeypatch.setattr(shopifyGraphQLV2Sink, "name", "Fulfillments")
 
     def connection(nodes, has_next):
         """Build a connection with unique cursors; also return its last cursor."""
@@ -380,7 +382,7 @@ def test_empty_line_items_list_is_rejected(fulfillment_sink):
 def test_non_fulfillment_sink_ignores_line_items(fulfillment_sink, monkeypatch):
     """SalesOrders passes the ORDER payload here; its line_items are not fulfillment lines."""
     sink, captured = fulfillment_sink
-    monkeypatch.setattr(sink, "name", "SalesOrders", raising=False)
+    monkeypatch.setattr(shopifyGraphQLV2Sink, "name", "SalesOrders")
 
     sink.fulfil_order(
         {"fulfilled": True, "line_items": [{"id": "111", "quantity": 2}]}, "1234567890"
