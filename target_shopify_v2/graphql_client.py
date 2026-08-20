@@ -153,6 +153,14 @@ class shopifyGraphQLV2Sink(HotglueSink):
         return order_id
 
     def fulfil_order(self, record, order_id, payload=None):
+        """Create a Shopify fulfillment for a record, optionally scoped to line items.
+
+        With no ``line_items`` on the record, every remaining item on every fulfillment
+        order is fulfilled - the long-standing behavior. With ``line_items``, only those
+        order line items are fulfilled, resolved to their FulfillmentOrderLineItem ids.
+
+        Returns the new fulfillment's id, or ``None`` if the record is not fulfilled.
+        """
         mutation = """
             mutation fulfillmentCreateV2($fulfillment: FulfillmentV2Input!) {
             fulfillmentCreateV2(fulfillment: $fulfillment) {
@@ -179,15 +187,34 @@ class shopifyGraphQLV2Sink(HotglueSink):
         fulfill_items = []
         if not order_id.startswith("gid://shopify/Order/"):
             order_id = "gid://shopify/Order/" + order_id
-        order_details = self.query_order(order_id)
-        if "order" in order_details["data"]:
-            line_items = order_details["data"]["order"]["fulfillmentOrders"]["edges"]
 
-            if not line_items:
-                raise Exception(f"There are no fulfillment orders for this order: {order_details['data']['order']}")
+        # SalesOrders records reach this method too, and they carry the ORDER's own
+        # line_items, which are not fulfillment line items. Only the Fulfillments sink
+        # may scope a fulfillment.
+        requested_items = record.get("line_items") if self.name == "Fulfillments" else None
 
-            for line_item in line_items:
-                fulfill_items.append({"fulfillmentOrderId": line_item["node"]["id"]})
+        if requested_items is not None and not requested_items:
+            # An empty list is ambiguous: omitting the key means "fulfill the whole
+            # order", so silently treating [] the same way would over-fulfill.
+            raise Exception(
+                f"Fulfillment record for order {order_id} has an empty line_items "
+                "list. Omit the key entirely to fulfill the whole order."
+            )
+
+        if requested_items:
+            fulfill_items = self.match_fulfillment_line_items(order_id, requested_items)
+        else:
+            order_details = self.query_order(order_id)
+            if "order" in order_details["data"]:
+                fulfillment_orders = order_details["data"]["order"]["fulfillmentOrders"]["edges"]
+
+                if not fulfillment_orders:
+                    raise Exception(f"There are no fulfillment orders for this order: {order_details['data']['order']}")
+
+                # No line items supplied: fulfill every remaining item on each fulfillment
+                # order. Omitting fulfillmentOrderLineItems is what Shopify reads as "all".
+                for fulfillment_order in fulfillment_orders:
+                    fulfill_items.append({"fulfillmentOrderId": fulfillment_order["node"]["id"]})
 
         tracking_info = {
             "company": record.get("carrier"),
@@ -203,6 +230,228 @@ class shopifyGraphQLV2Sink(HotglueSink):
         )
         self.post_message(res_return)
         return res_return.get('data', {}).get('fulfillmentCreateV2', {}).get('fulfillment', {}).get('id')
+
+    @classmethod
+    def build_requested_quantities(cls, requested_items):
+        """Total the requested quantity per order line item, rejecting malformed entries.
+
+        Every entry is validated: an entry with no id, or with a quantity that is not a
+        positive whole number, raises rather than being skipped. Silently dropping one
+        entry while fulfilling its siblings is the same class of bug this method exists
+        to fix.
+        """
+        outstanding = {}
+        for item in requested_items:
+            if not isinstance(item, dict):
+                raise ValueError(f"Fulfillment line item must be an object, got {item!r}")
+
+            key = cls.normalize_line_item_id(item.get("id"))
+            if not key:
+                raise ValueError(f"Fulfillment line item is missing an id: {item!r}")
+
+            outstanding[key] = outstanding.get(key, 0) + cls.validate_quantity(item.get("quantity"))
+
+        return outstanding
+
+    @staticmethod
+    def validate_quantity(raw_quantity):
+        """A requested fulfillment quantity must be a positive integer.
+
+        Shopify types `FulfillmentOrderLineItemInput.quantity` as `Int!`, so anything
+        else is invalid at the API regardless; rejecting it here fails fast with a clear
+        message instead of sending a request Shopify will refuse, and avoids the silent
+        truncation `int()` would do. `bool` is rejected explicitly because it subclasses
+        `int` in Python.
+        """
+        if isinstance(raw_quantity, bool) or not isinstance(raw_quantity, int) or raw_quantity <= 0:
+            raise ValueError(
+                f"Fulfillment line item quantity must be a positive integer, got {raw_quantity!r}"
+            )
+        return raw_quantity
+
+    @staticmethod
+    def normalize_line_item_id(line_item_id):
+        """Reduce a Shopify line item id to its bare numeric form.
+
+        Shopify returns gids ("gid://shopify/LineItem/123"); callers may send either a
+        gid or the bare id, so both sides are normalized before matching.
+        """
+        if line_item_id is None:
+            return None
+        return str(line_item_id).rsplit("/", 1)[-1]
+
+    def match_fulfillment_line_items(self, order_id, requested_items):
+        """Resolve requested order line items to fulfillment order line items.
+
+        `fulfillmentOrderLineItems[].id` is the FulfillmentOrderLineItem id, not the order
+        LineItem id, so the requested ids are joined through `lineItem { id }`. A fulfillment
+        order holding none of the requested items is skipped entirely rather than being sent
+        with a blank line item list (which Shopify would read as "fulfill everything").
+
+        A single order line can span several fulfillment orders when Shopify splits it across
+        locations, so the requested quantity is consumed across fulfillment orders in the
+        order Shopify returns them, clamped to each line's remainingQuantity.
+        """
+        # Validate every requested entry BEFORE touching Shopify: a malformed request
+        # should fail with a clear error rather than a lookup error, and should not
+        # spend query capacity first.
+        outstanding = self.build_requested_quantities(requested_items)
+
+        fulfillment_orders = self.fetch_all_fulfillment_order_line_items(order_id)
+        if not fulfillment_orders:
+            raise Exception(f"There are no fulfillment orders for this order: {order_id}")
+
+        fulfill_items = []
+        for node in fulfillment_orders:
+            entries = []
+            for fulfillment_order_line_item in node.get("lineItems") or []:
+                key = self.normalize_line_item_id(
+                    (fulfillment_order_line_item.get("lineItem") or {}).get("id")
+                )
+                wanted = outstanding.get(key, 0)
+                if wanted <= 0:
+                    continue
+
+                remaining = fulfillment_order_line_item.get("remainingQuantity")
+                quantity = wanted if remaining is None else min(wanted, remaining)
+                if quantity <= 0:
+                    continue
+
+                entries.append({"id": fulfillment_order_line_item["id"], "quantity": quantity})
+                outstanding[key] = wanted - quantity
+
+            if entries:
+                fulfill_items.append({
+                    "fulfillmentOrderId": node["id"],
+                    "fulfillmentOrderLineItems": entries,
+                })
+
+        unmatched = sorted(key for key, quantity in outstanding.items() if quantity > 0)
+        if unmatched:
+            self.logger.warning(
+                f"Order {order_id}: no fulfillable fulfillment order line items found for "
+                f"line item(s) {unmatched}; they were not included in this fulfillment."
+            )
+
+        if not fulfill_items:
+            raise Exception(
+                f"None of the requested line items are fulfillable on order {order_id}: {unmatched}"
+            )
+
+        return fulfill_items
+
+    # Page size for both fulfillment order connections. Kept modest on purpose: nested
+    # connections multiply for Shopify's calculated query cost and the per-query ceiling
+    # is 1000 points, so 25x25 stays well inside it. Both levels are paginated, so this
+    # bounds cost per request rather than bounding how much data is retrieved.
+    FULFILLMENT_ORDER_PAGE_SIZE = 25
+
+    def fetch_all_fulfillment_order_line_items(self, order_id):
+        """Every fulfillment order for an order, each with ALL of its line items.
+
+        Both connections are paginated to exhaustion. Returns a flat list of
+        ``{"id": ..., "lineItems": [ {id, remainingQuantity, lineItem: {id}}, ... ]}``.
+        """
+        fulfillment_orders = []
+        cursor = None
+
+        while True:
+            response = self.query_fulfillment_order_line_items(order_id, after=cursor)
+            order = (response.get("data") or {}).get("order")
+            if not order:
+                raise Exception(f"Could not load fulfillment orders for order: {order_id}")
+
+            connection = order["fulfillmentOrders"]
+            edges = connection.get("edges") or []
+            for edge in edges:
+                node = edge["node"]
+                fulfillment_orders.append({
+                    "id": node["id"],
+                    "lineItems": self._all_line_items_for(node),
+                })
+
+            if not edges or not (connection.get("pageInfo") or {}).get("hasNextPage"):
+                return fulfillment_orders
+            cursor = edges[-1]["cursor"]
+
+    def _all_line_items_for(self, fulfillment_order_node):
+        """Drain a fulfillment order's lineItems connection, following cursors."""
+        connection = fulfillment_order_node.get("lineItems") or {}
+        edges = connection.get("edges") or []
+        line_items = [edge["node"] for edge in edges]
+
+        while (connection.get("pageInfo") or {}).get("hasNextPage") and edges:
+            response = self.query_fulfillment_order_line_items_page(
+                fulfillment_order_node["id"], edges[-1]["cursor"]
+            )
+            connection = ((response.get("data") or {}).get("node") or {}).get("lineItems") or {}
+            edges = connection.get("edges") or []
+            line_items.extend(edge["node"] for edge in edges)
+
+        return line_items
+
+    def query_fulfillment_order_line_items(self, order_id, after=None):
+        """One page of fulfillment orders, each with its first page of line items."""
+        query = """
+                query($id: ID!, $first: Int!, $after: String) {
+                    order(id: $id) {
+                        fulfillmentOrders(first: $first, after: $after) {
+                            pageInfo { hasNextPage }
+                            edges {
+                                cursor
+                                node {
+                                    id
+                                    lineItems(first: $first) {
+                                        pageInfo { hasNextPage }
+                                        edges {
+                                            cursor
+                                            node {
+                                                id
+                                                remainingQuantity
+                                                lineItem {
+                                                    id
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+        """
+        return self.shopify_query(
+            query,
+            {"id": order_id, "first": self.FULFILLMENT_ORDER_PAGE_SIZE, "after": after},
+        )
+
+    def query_fulfillment_order_line_items_page(self, fulfillment_order_id, after):
+        """A further page of one fulfillment order's line items."""
+        query = """
+                query($id: ID!, $first: Int!, $after: String) {
+                    node(id: $id) {
+                        ... on FulfillmentOrder {
+                            lineItems(first: $first, after: $after) {
+                                pageInfo { hasNextPage }
+                                edges {
+                                    cursor
+                                    node {
+                                        id
+                                        remainingQuantity
+                                        lineItem {
+                                            id
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+        """
+        return self.shopify_query(
+            query,
+            {"id": fulfillment_order_id, "first": self.FULFILLMENT_ORDER_PAGE_SIZE, "after": after},
+        )
 
     def query_sku(self, sku):
         query = """
