@@ -49,6 +49,7 @@ def fulfillment_sink(monkeypatch):
         ({}, False),
         ({"notify_customer": None}, False),
         ({"notify_customer": False}, False),
+        ({"notify_customer": 1}, False),
         ({"notify_customer": "true"}, False),
         ({"notify_customer": True}, True),
     ],
