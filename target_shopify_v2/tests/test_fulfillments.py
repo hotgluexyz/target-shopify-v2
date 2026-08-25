@@ -13,6 +13,8 @@ def fulfillment_sink(monkeypatch):
     sink = object.__new__(shopifyGraphQLV2Sink)
     captured = {}
 
+    monkeypatch.setattr(shopifyGraphQLV2Sink, "name", "Fulfillments")
+
     monkeypatch.setattr(
         sink,
         "query_order",
