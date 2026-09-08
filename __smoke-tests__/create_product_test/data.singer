@@ -1,0 +1,2 @@
+{"type":"SCHEMA","stream":"Products","schema":{"type":["object","null"],"properties":{"name":{"type":["string","null"]},"description":{"type":["string","null"]},"published":{"type":["boolean","null"]},"variants":{"type":["array","null"],"items":{"type":["object","null"],"properties":{"sku":{"type":["string","null"]}}}}}},"key_properties":[]}
+{"type":"RECORD","stream":"Products","record":{"name":"Nassredean v9","description":"Software Engineer","published":false,"variants":[{"sku":"sku-51945901"}]}}
