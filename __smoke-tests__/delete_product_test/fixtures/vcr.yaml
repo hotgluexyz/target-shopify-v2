@@ -1,0 +1,103 @@
+interactions:
+- request:
+    body: '{"query": "\n            mutation productDelete($input: ProductDeleteInput!)
+      {\n              productDelete(input: $input) {\n                deletedProductId\n                userErrors
+      {\n                  message\n                }\n              }\n            }",
+      "variables": {"input": {"id": "gid://shopify/Product/9311412060380"}}}'
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '339'
+      Content-Type:
+      - application/json
+      User-Agent:
+      - python-requests/2.33.1
+    method: POST
+    uri: https://hotglue-testing-1.myshopify.com/admin/api/2021-07/graphql.json
+  response:
+    body:
+      string: '{"data":{"productDelete":{"deletedProductId":"gid://shopify/Product/9311412060380","userErrors":[]}},"extensions":{"cost":{"requestedQueryCost":10,"actualQueryCost":10,"throttleStatus":{"maximumAvailable":2000.0,"currentlyAvailable":1990,"restoreRate":100.0}}}}'
+    headers:
+      Alt-Svc:
+      - h3=":443"; ma=86400
+      CF-RAY:
+      - 9e589789a8f9909b-KHI
+      Connection:
+      - keep-alive
+      Content-Type:
+      - application/json; charset=utf-8
+      Date:
+      - Wed, 01 Apr 2026 15:22:54 GMT
+      NEL:
+      - '{"success_fraction":0.01,"report_to":"cf-nel","max_age":604800}'
+      Report-To:
+      - '{"endpoints":[{"url":"https:\/\/a.nel.cloudflare.com\/report\/v4?s=B4QSyc7nEiifQwdFlz4DuV8RtN1CH7giBhU%2BZMfIbzhNYuSHmnvWM7ZByllREVQgioUYdyg3WaHfhenPVCcdyjEOY8Yy%2FdM8ax07qa93Q1hSqLbvOYA6%2BObywAGBG4J%2Fl6mo2c%2BtC4AVrH5DcZEbetI%3D"}],"group":"cf-nel","max_age":604800}'
+      Server:
+      - cloudflare
+      Transfer-Encoding:
+      - chunked
+      cf-cache-status:
+      - DYNAMIC
+      content-language:
+      - en
+      content-length:
+      - '261'
+      content-security-policy:
+      - 'default-src ''self'' data: blob: ''unsafe-inline'' ''unsafe-eval'' https://*
+        shopify-pos://*; block-all-mixed-content; child-src ''self'' https://* shopify-pos://*;
+        connect-src ''self'' wss://* https://*; frame-ancestors ''none''; img-src
+        ''self'' data: blob: https:; script-src https://cdn.shopify.com https://cdn.shopifycdn.net
+        https://checkout.pci.shopifyinc.com https://checkout.pci.shopifyinc.com/build/04ed4e1/card_fields.js
+        https://api.stripe.com https://mpsnare.iesnare.com https://appcenter.intuit.com
+        https://www.paypal.com https://js.braintreegateway.com https://c.paypal.com
+        https://maps.googleapis.com https://www.google-analytics.com https://v.shopify.com
+        ''self'' ''unsafe-inline'' ''unsafe-eval''; upgrade-insecure-requests; report-uri
+        /csp-report?source%5Baction%5D=query&source%5Bapp%5D=Shopify&source%5Bcontroller%5D=admin%2Fgraphql&source%5Bsection%5D=admin_api&source%5Buuid%5D=972f1d6a-7715-4d60-80af-e1fe7ac5da32-1775056974;
+        report-to shopify-csp'
+      referrer-policy:
+      - origin-when-cross-origin
+      reporting-endpoints:
+      - shopify-csp="/csp-report?source%5Baction%5D=query&source%5Bapp%5D=Shopify&source%5Bcontroller%5D=admin%2Fgraphql&source%5Bsection%5D=admin_api&source%5Buuid%5D=972f1d6a-7715-4d60-80af-e1fe7ac5da32-1775056974"
+      server-timing:
+      - processing;dur=321, verdict_flag_enabled;desc="count=29";dur=1.881, graphql;desc="admin/mutation/other",
+        _y;desc="33a1cc42-9d36-48b7-902d-019bc54eff2e", _s;desc="13939691-e3e5-4882-b42e-d4e9a7870fd3"
+      - cfRequestDuration;dur=653.999805
+      strict-transport-security:
+      - max-age=7889238
+      vary:
+      - Accept-Encoding,Sec-Fetch-Site
+      x-content-type-options:
+      - nosniff
+      x-dc:
+      - gcp-europe-west1,gcp-us-central1,gcp-us-central1
+      x-download-options:
+      - noopen
+      x-frame-options:
+      - DENY
+      x-permitted-cross-domain-policies:
+      - none
+      x-request-id:
+      - 972f1d6a-7715-4d60-80af-e1fe7ac5da32-1775056974
+      x-shopify-api-gql-engine:
+      - cardinal
+      x-shopify-api-version:
+      - 2025-04
+      x-shopify-api-version-warning:
+      - https://shopify.dev/concepts/about-apis/versioning
+      x-stats-apiclientid:
+      - '6014211'
+      x-stats-apipermissionid:
+      - '343856611548'
+      x-stats-userid:
+      - ''
+      x-xss-protection:
+      - 1; mode=block
+    status:
+      code: 200
+      message: OK
+version: 1

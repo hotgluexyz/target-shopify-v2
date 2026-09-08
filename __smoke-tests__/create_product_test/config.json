@@ -1,0 +1,12 @@
+{
+    "target": "shopify-v2",
+    "domain": "shopify.com",
+    "label": "Shopify",
+    "version": "v2",
+    "type": "api",
+    "icon": "https://s3.amazonaws.com/cdn.hotglue.xyz/images/logos/shopify.svg",
+    "hg_schema": "ecommerce",
+    "api_key": "API_KEY",
+    "shop": "hotglue-testing-1",
+    "path_prefix": ""
+}

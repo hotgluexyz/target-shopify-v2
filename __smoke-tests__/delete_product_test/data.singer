@@ -1,0 +1,3 @@
+{"type":"SCHEMA","stream":"Products:delete","schema":{"type":["object","null"],"properties":{"id":{"type":["string","null"]},"externalId":{"type":["string","null"]}}},"key_properties":[]}
+{"type":"RECORD","stream":"Products:delete","record":{"id":"gid://shopify/Product/9311412060380", "externalId": "RANDOM_EXT_ID"}}
+{"type":"STATE","value":{}}

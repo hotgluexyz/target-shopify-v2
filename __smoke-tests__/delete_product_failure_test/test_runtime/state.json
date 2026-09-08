@@ -1,0 +1,1 @@
+{"bookmarks": {"Products:delete": [{"hash": "7c7ce527ad9601374ef610e8eea86c9a5b5790400bd9f4ccfd3bc5752bb7ee57", "success": false, "externalId": "RANDOM_EXT_ID", "error": "Product does not exist"}]}, "summary": {"Products:delete": {"success": 0, "fail": 1, "existing": 0, "updated": 0}}}
