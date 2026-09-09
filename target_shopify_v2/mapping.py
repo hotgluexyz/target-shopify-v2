@@ -154,8 +154,8 @@ class UnifiedMapping:
         product_metafields = [self._build_metafield(f) for f in record.get("custom_fields", [])]
         if product_metafields:
             payload["metafields"] = product_metafields
-        if "active" in record:
-            if record["active"] is True:
+        if record.get("active") is not None:
+            if record["active"]:
                 payload["status"] = "ACTIVE"
             else:
                 payload["status"] = "DRAFT"
