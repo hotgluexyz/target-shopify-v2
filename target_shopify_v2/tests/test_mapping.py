@@ -125,3 +125,19 @@ def test_multi_variant_mixed_tracking_on_create(mapping):
     assert variants[0]["inventoryItem"]["tracked"] is True
     assert variants[1]["inventoryItem"]["tracked"] is False
     assert variants[2]["inventoryItem"]["tracked"] is False
+
+
+@pytest.mark.parametrize(
+    "record_extra, expected_status",
+    [
+        ({"active": True}, "ACTIVE"),
+        ({"active": False}, "DRAFT"),
+        ({"active": None}, None),
+        ({}, None),
+    ],
+)
+def test_active_maps_to_status(mapping, record_extra, expected_status):
+    record = _base_record([{"sku": "SKU-1", "price": "10.00"}])
+    record.update(record_extra)
+    payload = mapping.inject_sopify_product_fields(record, {}, {})
+    assert payload.get("status") == expected_status
