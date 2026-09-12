@@ -223,6 +223,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
         }
         fulfillment_payload = {
             "lineItemsByFulfillmentOrder": fulfill_items,
+            "notifyCustomer": record.get("notify_customer") is True,
             "trackingInfo": tracking_info,
         }
         res_return = self.deploy_mutation(
