@@ -6,7 +6,8 @@ import time
 
 import backoff
 import requests
-from requests.exceptions import ConnectionError, ReadTimeout, Timeout
+from requests.exceptions import ConnectionError, ConnectTimeout, Timeout
+from urllib3.exceptions import ProtocolError
 
 from target_shopify_v2.mapping import UnifiedMapping
 from target_shopify_v2.s3_image import (
@@ -41,6 +42,21 @@ class shopifyGraphQLV2Sink(HotglueSink):
         headers["Content-Type"] = "application/json"
         return headers
 
+    @staticmethod
+    def _safe_to_replay(exc: Exception) -> bool:
+        """True when the failure proves Shopify never executed the request."""
+        if isinstance(exc, RetriableAPIError):
+            # 429 is an explicit rejection; a 5xx may have committed the write.
+            response = getattr(exc, "response", None)
+            return response is not None and response.status_code == 429
+        if isinstance(exc, ConnectTimeout):
+            return True
+        if isinstance(exc, ConnectionError):
+            # A ProtocolError means the socket died mid-exchange, so the request
+            # may have been delivered; anything else failed before transmission.
+            return not isinstance(exc.args[0] if exc.args else None, ProtocolError)
+        return False
+
     @backoff.on_exception(
         backoff.expo,
         (RetriableAPIError, ConnectionError, Timeout),
@@ -52,9 +68,10 @@ class shopifyGraphQLV2Sink(HotglueSink):
     ) -> requests.Response:
         """POST to Shopify GraphQL, retrying transient network and server errors.
 
-        A ReadTimeout means the request reached Shopify and the outcome is unknown.
-        Mutations pass replay_safe=False so they fail instead of duplicating a write,
-        since none of the mutations this client sends accept an idempotency key.
+        Mutations pass replay_safe=False: none of the mutations this client sends
+        accept a Shopify idempotency key, so they are retried only when the failure
+        proves the request never executed. Any outcome Shopify may have committed is
+        raised as fatal rather than replayed into a duplicate write.
         """
         try:
             response = requests.post(
@@ -63,13 +80,13 @@ class shopifyGraphQLV2Sink(HotglueSink):
                 headers=self.get_http_headers(),
                 timeout=self.REQUEST_TIMEOUT,
             )
-        except ReadTimeout as exc:
-            if not replay_safe:
+            self.validate_response(response)
+        except (RetriableAPIError, ConnectionError, Timeout) as exc:
+            if not replay_safe and not self._safe_to_replay(exc):
                 raise FatalAPIError(
-                    f"Read timeout on non-idempotent request to {url}"
+                    f"Unconfirmed outcome for non-idempotent request to {url}: {exc}"
                 ) from exc
             raise
-        self.validate_response(response)
         return response
 
     def deploy_mutation(self, mutation, variables, input_name="input"):
