@@ -4,7 +4,9 @@
 import re
 import time
 
+import backoff
 import requests
+from requests.exceptions import ConnectionError, Timeout
 
 from target_shopify_v2.mapping import UnifiedMapping
 from target_shopify_v2.s3_image import (
@@ -19,6 +21,10 @@ from singer_sdk.exceptions import FatalAPIError, RetriableAPIError
 
 
 class shopifyGraphQLV2Sink(HotglueSink):
+    MAX_RETRIES = 5
+    BACKOFF_FACTOR = 2
+    REQUEST_TIMEOUT = (10, 60)
+
     @property
     def base_url(self):
         base = self.config.get('shop')
@@ -35,23 +41,36 @@ class shopifyGraphQLV2Sink(HotglueSink):
         headers["Content-Type"] = "application/json"
         return headers
 
-    def deploy_mutation(self, mutation, variables, input_name="input"):
-        res = requests.post(
-            url=self.base_url,
-            json={"query": mutation, "variables": variables},
+    @backoff.on_exception(
+        backoff.expo,
+        (RetriableAPIError, ConnectionError, Timeout),
+        max_tries=MAX_RETRIES,
+        factor=BACKOFF_FACTOR,
+    )
+    def _post_with_retry(self, url: str, payload: dict) -> requests.Response:
+        """POST to Shopify GraphQL, retrying transient network and server errors."""
+        response = requests.post(
+            url=url,
+            json=payload,
             headers=self.get_http_headers(),
+            timeout=self.REQUEST_TIMEOUT,
         )
-        self.validate_response(res)
+        self.validate_response(response)
+        return response
+
+    def deploy_mutation(self, mutation, variables, input_name="input"):
+        res = self._post_with_retry(
+            self.base_url,
+            {"query": mutation, "variables": variables},
+        )
         return res.json()
 
     def shopify_query(self, query, variables, input_name="input"):
-        res = requests.post(
-            url=self.base_url,
-            json={"query": query, "variables": variables},
-            headers=self.get_http_headers(),
+        res = self._post_with_retry(
+            self.base_url,
+            {"query": query, "variables": variables},
         )
         self.logger.debug(f"DEBUG REQUEST- url:{self.base_url} query: {query}, variables: {variables}")
-        self.validate_response(res)
         return res.json()
 
     def upload_order(self, record):
