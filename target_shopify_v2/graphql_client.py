@@ -6,7 +6,7 @@ import time
 
 import backoff
 import requests
-from requests.exceptions import ConnectionError, Timeout
+from requests.exceptions import ConnectionError, ReadTimeout, Timeout
 
 from target_shopify_v2.mapping import UnifiedMapping
 from target_shopify_v2.s3_image import (
@@ -47,14 +47,28 @@ class shopifyGraphQLV2Sink(HotglueSink):
         max_tries=MAX_RETRIES,
         factor=BACKOFF_FACTOR,
     )
-    def _post_with_retry(self, url: str, payload: dict) -> requests.Response:
-        """POST to Shopify GraphQL, retrying transient network and server errors."""
-        response = requests.post(
-            url=url,
-            json=payload,
-            headers=self.get_http_headers(),
-            timeout=self.REQUEST_TIMEOUT,
-        )
+    def _post_with_retry(
+        self, url: str, payload: dict, replay_safe: bool = True
+    ) -> requests.Response:
+        """POST to Shopify GraphQL, retrying transient network and server errors.
+
+        A ReadTimeout means the request reached Shopify and the outcome is unknown.
+        Mutations pass replay_safe=False so they fail instead of duplicating a write,
+        since none of the mutations this client sends accept an idempotency key.
+        """
+        try:
+            response = requests.post(
+                url=url,
+                json=payload,
+                headers=self.get_http_headers(),
+                timeout=self.REQUEST_TIMEOUT,
+            )
+        except ReadTimeout as exc:
+            if not replay_safe:
+                raise FatalAPIError(
+                    f"Read timeout on non-idempotent request to {url}"
+                ) from exc
+            raise
         self.validate_response(response)
         return response
 
@@ -62,6 +76,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
         res = self._post_with_retry(
             self.base_url,
             {"query": mutation, "variables": variables},
+            replay_safe=False,
         )
         return res.json()
 
