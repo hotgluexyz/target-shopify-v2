@@ -25,6 +25,9 @@ class shopifyGraphQLV2Sink(HotglueSink):
     MAX_RETRIES = 5
     BACKOFF_FACTOR = 2
     REQUEST_TIMEOUT = (10, 60)
+    # GraphQL error codes Shopify returns inside an HTTP 200 envelope that clear
+    # on their own; every other code is a genuine validation or auth failure.
+    RETRIABLE_GRAPHQL_CODES = ("THROTTLED", "INTERNAL_SERVER_ERROR")
 
     @property
     def base_url(self):
@@ -57,6 +60,33 @@ class shopifyGraphQLV2Sink(HotglueSink):
             return not isinstance(exc.args[0] if exc.args else None, ProtocolError)
         return False
 
+    @classmethod
+    def _is_transient_envelope(cls, response: requests.Response) -> bool:
+        """True when an errors[] body carries a code that clears on its own."""
+        try:
+            errors = response.json().get("errors") or []
+        except ValueError:
+            return False
+        return any(
+            isinstance(error, dict)
+            and (error.get("extensions") or {}).get("code") in cls.RETRIABLE_GRAPHQL_CODES
+            for error in errors
+        )
+
+    def _validate(self, response: requests.Response, replay_safe: bool) -> None:
+        """Validate the response, keeping transient GraphQL envelopes retriable.
+
+        validate_response treats any errors[] body as fatal, but Shopify reports rate
+        limiting that way inside an HTTP 200. Queries back off on those codes;
+        mutations stay fatal because replaying them is not proven safe.
+        """
+        try:
+            self.validate_response(response)
+        except FatalAPIError:
+            if not (replay_safe and self._is_transient_envelope(response)):
+                raise
+            raise RetriableAPIError(response.text, response) from None
+
     @backoff.on_exception(
         backoff.expo,
         (RetriableAPIError, ConnectionError, Timeout),
@@ -65,8 +95,8 @@ class shopifyGraphQLV2Sink(HotglueSink):
     )
     def _post_with_retry(
         self, url: str, payload: dict, replay_safe: bool = True
-    ) -> requests.Response:
-        """POST to Shopify GraphQL, retrying transient network and server errors.
+    ) -> dict:
+        """POST to Shopify GraphQL and return the decoded body.
 
         Mutations pass replay_safe=False: none of the mutations this client sends
         accept a Shopify idempotency key, so they are retried only when the failure
@@ -80,30 +110,28 @@ class shopifyGraphQLV2Sink(HotglueSink):
                 headers=self.get_http_headers(),
                 timeout=self.REQUEST_TIMEOUT,
             )
-            self.validate_response(response)
+            self._validate(response, replay_safe)
         except (RetriableAPIError, ConnectionError, Timeout) as exc:
             if not replay_safe and not self._safe_to_replay(exc):
                 raise FatalAPIError(
                     f"Unconfirmed outcome for non-idempotent request to {url}: {exc}"
                 ) from exc
             raise
-        return response
+        return response.json()
 
     def deploy_mutation(self, mutation, variables, input_name="input"):
-        res = self._post_with_retry(
+        return self._post_with_retry(
             self.base_url,
             {"query": mutation, "variables": variables},
             replay_safe=False,
         )
-        return res.json()
 
     def shopify_query(self, query, variables, input_name="input"):
-        res = self._post_with_retry(
+        self.logger.debug(f"DEBUG REQUEST- url:{self.base_url} query: {query}, variables: {variables}")
+        return self._post_with_retry(
             self.base_url,
             {"query": query, "variables": variables},
         )
-        self.logger.debug(f"DEBUG REQUEST- url:{self.base_url} query: {query}, variables: {variables}")
-        return res.json()
 
     def upload_order(self, record):
         mapping = UnifiedMapping()
