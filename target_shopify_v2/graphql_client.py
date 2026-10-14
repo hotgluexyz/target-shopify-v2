@@ -9,6 +9,11 @@ import requests
 from requests.exceptions import ConnectionError, ConnectTimeout, Timeout
 from urllib3.exceptions import ProtocolError
 
+from target_shopify_v2.auth import (
+    get_valid_access_token,
+    refresh_access_token_after_401,
+    uses_expiring_token,
+)
 from target_shopify_v2.mapping import UnifiedMapping
 from target_shopify_v2.s3_image import (
     cleanup_temp_images,
@@ -38,10 +43,13 @@ class shopifyGraphQLV2Sink(HotglueSink):
 
     def get_http_headers(self):
         headers = {}
-        # NOTE: We are defaulting to using OAuth access token first, then falling back to API Key
-        headers["X-Shopify-Access-Token"] = str(
-            self.config.get("access_token", self.config.get("api_key"))
-        )
+        if uses_expiring_token(self._target):
+            headers["X-Shopify-Access-Token"] = get_valid_access_token(self._target)
+        else:
+            # NOTE: We are defaulting to using OAuth access token first, then falling back to API Key
+            headers["X-Shopify-Access-Token"] = str(
+                self.config.get("access_token", self.config.get("api_key"))
+            )
         headers["Content-Type"] = "application/json"
         return headers
 
@@ -103,13 +111,21 @@ class shopifyGraphQLV2Sink(HotglueSink):
         proves the request never executed. Any outcome Shopify may have committed is
         raised as fatal rather than replayed into a duplicate write.
         """
-        try:
-            response = requests.post(
+        def send():
+            return requests.post(
                 url=url,
                 json=payload,
                 headers=self.get_http_headers(),
                 timeout=self.REQUEST_TIMEOUT,
             )
+
+        try:
+            response = send()
+            if response.status_code == 401 and uses_expiring_token(self._target):
+                # A 401 means Shopify never ran the request, so even a mutation is safe to resend
+                rejected_token = response.request.headers["X-Shopify-Access-Token"]
+                refresh_access_token_after_401(self._target, rejected_token)
+                response = send()
             self._validate(response, replay_safe)
         except (RetriableAPIError, ConnectionError, Timeout) as exc:
             if not replay_safe and not self._safe_to_replay(exc):
