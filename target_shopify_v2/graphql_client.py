@@ -16,9 +16,9 @@ from target_shopify_v2.s3_image import (
     has_base64_images,
     resolve_blobs_to_urls,
 )
-from target_hotglue.client import HotglueSink
+from hotglue_singer_sdk.target_sdk.client import HotglueSink
 from datetime import datetime
-from singer_sdk.exceptions import FatalAPIError, RetriableAPIError
+from hotglue_singer_sdk.exceptions import FatalAPIError, RetriableAPIError
 
 
 class shopifyGraphQLV2Sink(HotglueSink):
