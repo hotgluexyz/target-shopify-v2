@@ -1008,7 +1008,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
             if inv:
                 inventory_item.append(inv)
 
-        elif len(detail["data"]["products"]["edges"]) > 0:
+        elif detail["data"].get("products") and len(detail["data"]["products"]["edges"]) > 0:
             for product in detail["data"]["products"]["edges"]:
                 for variant in product["node"]["variants"]["edges"]:
                     if variant["node"]["inventoryItem"]:
