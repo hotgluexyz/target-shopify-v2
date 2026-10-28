@@ -9,6 +9,7 @@ import requests
 from requests.exceptions import ConnectionError, ConnectTimeout, Timeout
 from urllib3.exceptions import ProtocolError
 
+from target_shopify_v2.auth import ACCESS_TOKEN_HEADER, uses_expiring_token
 from target_shopify_v2.mapping import UnifiedMapping
 from target_shopify_v2.s3_image import (
     cleanup_temp_images,
@@ -36,12 +37,27 @@ class shopifyGraphQLV2Sink(HotglueSink):
             base = f"{base}.myshopify.com"
         return f"https://{base}/admin/api/2021-07/graphql.json"
 
+    @property
+    def authenticator(self):
+        """The target's ShopifyOAuthAuthenticator, shared by all sinks; None unless the token expires."""
+        if not uses_expiring_token(self.config):
+            return None
+        if getattr(self._target, "_shopify_authenticator", None) is None:
+            authenticator_class, auth_endpoint = self._target.access_token_support(self._target)
+            self._target._shopify_authenticator = authenticator_class(
+                self._target, auth_endpoint=auth_endpoint
+            )
+        return self._target._shopify_authenticator
+
     def get_http_headers(self):
         headers = {}
-        # NOTE: We are defaulting to using OAuth access token first, then falling back to API Key
-        headers["X-Shopify-Access-Token"] = str(
-            self.config.get("access_token", self.config.get("api_key"))
-        )
+        if self.authenticator is not None:
+            headers.update(self.authenticator.auth_headers)
+        else:
+            # NOTE: We are defaulting to using OAuth access token first, then falling back to API Key
+            headers["X-Shopify-Access-Token"] = str(
+                self.config.get("access_token", self.config.get("api_key"))
+            )
         headers["Content-Type"] = "application/json"
         return headers
 
@@ -103,13 +119,20 @@ class shopifyGraphQLV2Sink(HotglueSink):
         proves the request never executed. Any outcome Shopify may have committed is
         raised as fatal rather than replayed into a duplicate write.
         """
-        try:
-            response = requests.post(
+        def send():
+            return requests.post(
                 url=url,
                 json=payload,
                 headers=self.get_http_headers(),
                 timeout=self.REQUEST_TIMEOUT,
             )
+
+        try:
+            response = send()
+            if response.status_code == 401 and self.authenticator is not None:
+                # A 401 means Shopify never ran the request, so even a mutation is safe to resend
+                self.authenticator.refresh_after_401(response.request.headers[ACCESS_TOKEN_HEADER])
+                response = send()
             self._validate(response, replay_safe)
         except (RetriableAPIError, ConnectionError, Timeout) as exc:
             if not replay_safe and not self._safe_to_replay(exc):
