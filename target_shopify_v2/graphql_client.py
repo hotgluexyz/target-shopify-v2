@@ -9,11 +9,7 @@ import requests
 from requests.exceptions import ConnectionError, ConnectTimeout, Timeout
 from urllib3.exceptions import ProtocolError
 
-from target_shopify_v2.auth import (
-    get_valid_access_token,
-    refresh_access_token_after_401,
-    uses_expiring_token,
-)
+from target_shopify_v2.auth import ACCESS_TOKEN_HEADER, uses_expiring_token
 from target_shopify_v2.mapping import UnifiedMapping
 from target_shopify_v2.s3_image import (
     cleanup_temp_images,
@@ -41,10 +37,22 @@ class shopifyGraphQLV2Sink(HotglueSink):
             base = f"{base}.myshopify.com"
         return f"https://{base}/admin/api/2021-07/graphql.json"
 
+    @property
+    def authenticator(self):
+        """The target's ShopifyOAuthAuthenticator, shared by all sinks; None unless the token expires."""
+        if not uses_expiring_token(self.config):
+            return None
+        if getattr(self._target, "_shopify_authenticator", None) is None:
+            authenticator_class, auth_endpoint = self._target.access_token_support(self._target)
+            self._target._shopify_authenticator = authenticator_class(
+                self._target, auth_endpoint=auth_endpoint
+            )
+        return self._target._shopify_authenticator
+
     def get_http_headers(self):
         headers = {}
-        if uses_expiring_token(self._target):
-            headers["X-Shopify-Access-Token"] = get_valid_access_token(self._target)
+        if self.authenticator is not None:
+            headers.update(self.authenticator.auth_headers)
         else:
             # NOTE: We are defaulting to using OAuth access token first, then falling back to API Key
             headers["X-Shopify-Access-Token"] = str(
@@ -121,10 +129,9 @@ class shopifyGraphQLV2Sink(HotglueSink):
 
         try:
             response = send()
-            if response.status_code == 401 and uses_expiring_token(self._target):
+            if response.status_code == 401 and self.authenticator is not None:
                 # A 401 means Shopify never ran the request, so even a mutation is safe to resend
-                rejected_token = response.request.headers["X-Shopify-Access-Token"]
-                refresh_access_token_after_401(self._target, rejected_token)
+                self.authenticator.refresh_after_401(response.request.headers[ACCESS_TOKEN_HEADER])
                 response = send()
             self._validate(response, replay_safe)
         except (RetriableAPIError, ConnectionError, Timeout) as exc:
