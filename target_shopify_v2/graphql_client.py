@@ -21,9 +21,9 @@ from target_shopify_v2.s3_image import (
     has_base64_images,
     resolve_blobs_to_urls,
 )
-from target_hotglue.client import HotglueSink
+from hotglue_singer_sdk.target_sdk.client import HotglueSink
 from datetime import datetime
-from singer_sdk.exceptions import FatalAPIError, RetriableAPIError
+from hotglue_singer_sdk.exceptions import FatalAPIError, RetriableAPIError
 
 
 class shopifyGraphQLV2Sink(HotglueSink):
@@ -1024,7 +1024,7 @@ class shopifyGraphQLV2Sink(HotglueSink):
             if inv:
                 inventory_item.append(inv)
 
-        elif len(detail["data"]["products"]["edges"]) > 0:
+        elif detail["data"].get("products") and len(detail["data"]["products"]["edges"]) > 0:
             for product in detail["data"]["products"]["edges"]:
                 for variant in product["node"]["variants"]["edges"]:
                     if variant["node"]["inventoryItem"]:

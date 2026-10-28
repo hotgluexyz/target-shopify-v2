@@ -151,7 +151,7 @@ class UnifiedMapping:
         if "options" in record:
             payload["options"] = record["options"]
 
-        product_metafields = [self._build_metafield(f) for f in record.get("custom_fields", [])]
+        product_metafields = [self._build_metafield(f) for f in record.get("custom_fields") or []]
         if product_metafields:
             payload["metafields"] = product_metafields
         if record.get("active") is not None:
