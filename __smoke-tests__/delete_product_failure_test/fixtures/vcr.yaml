@@ -1,0 +1,112 @@
+interactions:
+- request:
+    body: '{"query": "\n            mutation productDelete($input: ProductDeleteInput!)
+      {\n              productDelete(input: $input) {\n                deletedProductId\n                userErrors
+      {\n                  message\n                }\n              }\n            }",
+      "variables": {"input": {"id": "gid://shopify/Product/9311412060380"}}}'
+    headers:
+      Accept:
+      - '*/*'
+      Accept-Encoding:
+      - gzip, deflate, zstd
+      Connection:
+      - keep-alive
+      Content-Length:
+      - '339'
+      Content-Type:
+      - application/json
+      User-Agent:
+      - python-requests/2.31.0
+      X-Shopify-Access-Token:
+      - REDACTED
+    method: POST
+    uri: https://hotglue-testing-1.myshopify.com/admin/api/2021-07/graphql.json
+  response:
+    body:
+      string: '{"data": {"productDelete": {"deletedProductId": null, "userErrors":
+        [{"message": "Product does not exist"}]}}, "extensions": {"cost": {"requestedQueryCost":
+        10, "actualQueryCost": 10, "throttleStatus": {"maximumAvailable": 2000.0,
+        "currentlyAvailable": 1990, "restoreRate": 100.0}}}}'
+    headers:
+      CF-RAY:
+      - a58d6ce559be721a-KHI
+      Connection:
+      - keep-alive
+      Content-Type:
+      - application/json; charset=utf-8
+      Date:
+      - Wed, 11 Nov 2026 12:50:55 GMT
+      Nel:
+      - '{"report_to":"cf-nel","success_fraction":0.01,"max_age":604800}'
+      Report-To:
+      - '{"group":"cf-nel","max_age":604800,"endpoints":[{"url":"https://a.nel.cloudflare.com/report/v4?s=FnONZoxMnhemOEoFNWn7gvomy6fjaAbSGLsxy7MKBawzS6MBD%2FK3F3uQRD9GMBy%2BXSFf4yh9jbR8mp31mimhnCh8fsz1jsEkUJauG8Ca0s%2FdOYIn1YfQmKa5MsuGmVOPmtk7mHeWDDzj1W%2ByA06miLI%3D"}]}'
+      Server:
+      - cloudflare
+      Transfer-Encoding:
+      - chunked
+      alt-svc:
+      - h3=":443"; ma=86400
+      cf-cache-status:
+      - DYNAMIC
+      content-language:
+      - en
+      content-length:
+      - '264'
+      content-security-policy:
+      - 'default-src ''self'' data: blob: ''unsafe-inline'' ''unsafe-eval'' https://*
+        shopify-pos://*; child-src ''self'' https://* shopify-pos://*; connect-src
+        ''self'' wss://* https://*; frame-ancestors ''none''; img-src ''self'' data:
+        blob: https:; script-src https://cdn.shopify.com https://cdn.shopifycdn.net
+        https://checkout.pci.shopifyinc.com https://checkout.pci.shopifyinc.com/build/27bcf73/card_fields.js
+        https://api.stripe.com https://mpsnare.iesnare.com https://appcenter.intuit.com
+        https://www.paypal.com https://js.braintreegateway.com https://c.paypal.com
+        https://maps.googleapis.com https://www.google-analytics.com https://v.shopify.com
+        ''self'' ''unsafe-inline'' ''unsafe-eval''; upgrade-insecure-requests; report-uri
+        /csp-report?source%5Baction%5D=query&source%5Bapp%5D=Shopify&source%5Bcontroller%5D=admin%2Fgraphql&source%5Bsection%5D=admin_api&source%5Buuid%5D=96e968d9-f212-45cf-814d-1b525da2164a-1794401454;
+        report-to shopify-csp'
+      referrer-policy:
+      - origin-when-cross-origin
+      reporting-endpoints:
+      - shopify-csp="/csp-report?source%5Baction%5D=query&source%5Bapp%5D=Shopify&source%5Bcontroller%5D=admin%2Fgraphql&source%5Bsection%5D=admin_api&source%5Buuid%5D=96e968d9-f212-45cf-814d-1b525da2164a-1794401454"
+      server-timing:
+      - processing;dur=45, verdict_flag_enabled;desc="count=11";dur=0.67, graphql;desc="admin/mutation/other",
+        _y;desc="7666e408-eb6a-45ae-a0b8-f0cc052d4c75", _s;desc="7652ce36-5ffc-420e-a793-0d9c62502045",
+        _ye;desc="1825959055", _se;desc="1794403255"
+      strict-transport-security:
+      - max-age=7889238
+      vary:
+      - Accept-Encoding,Sec-Fetch-Site
+      x-content-type-options:
+      - nosniff
+      x-dc:
+      - gcp-europe-west1,gcp-us-central1,gcp-us-central1
+      x-download-options:
+      - noopen
+      x-frame-options:
+      - DENY
+      x-permitted-cross-domain-policies:
+      - none
+      x-request-id:
+      - 96e968d9-f212-45cf-814d-1b525da2164a-1794401454
+      x-shopify-api-gql-engine:
+      - cardinal
+      x-shopify-api-gql-operation-name:
+      - productDelete
+      x-shopify-api-gql-operation-signature:
+      - dc3d0754ed57462525d5164ab0726c53179e19bcfbda3fa31619f63942d2e401
+      x-shopify-api-version:
+      - 2026-01
+      x-shopify-api-version-warning:
+      - https://shopify.dev/concepts/about-apis/versioning
+      x-stats-apiclientid:
+      - '6014211'
+      x-stats-apipermissionid:
+      - '343856611548'
+      x-stats-userid:
+      - ''
+      x-xss-protection:
+      - 1; mode=block
+    status:
+      code: 200
+      message: OK
+version: 1

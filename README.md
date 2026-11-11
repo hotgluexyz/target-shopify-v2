@@ -79,6 +79,14 @@ Create tests within the `target_shopify_v2/tests` subfolder and
 poetry run pytest
 ```
 
+### Smoke Tests
+
+Colocated smoke tests live in `__smoke-tests__/<case>_test/`. Each case contains
+its Singer input, configuration, recorded VCR cassette, and expected target
+state.
+
+```
+
 You can also test the `target-shopify-v2` CLI interface directly using `poetry run`:
 
 ```bash
