@@ -2,6 +2,10 @@
 .secrets/*
 .vscode
 
+# Colocated smoke-test runtime + unsanitized scrub audits
+__smoke-tests__/**/test_runtime/
+__smoke-tests__/unsanitized_*_test/
+
 # Ignore meltano internal cache and sqlite systemdb
 
 .meltano/
