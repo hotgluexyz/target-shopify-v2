@@ -97,6 +97,8 @@ class UnifiedMapping:
                 variant_dictionary["title"] = title
             if variant.get("price"):
                 variant_dictionary["price"] = variant.get("price")
+            if "compare_at_price" in variant:
+                variant_dictionary["compareAtPrice"] = variant["compare_at_price"]
             if variant.get("id"):
                 variant_dictionary["id"] = variant["id"]
             if variant.get("sku"):
